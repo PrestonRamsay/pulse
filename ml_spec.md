@@ -1,4 +1,4 @@
-# ML Spec: <feature name>
+# ML Spec: Pulse Reliability Signal
 ## 1. Problem statement
 Riders using pulse rely on scheduled trips, but delays make it feel untrustworthy. Because complaints around departure times are the biggest category of complaint, we want to show how likely a trip is to be late for saved trips.
 ## 2. Prediction task
@@ -38,4 +38,4 @@ What warning cap, and how much pessimism, is product comfortable with?
 How should frequent routes be handled, where riders don't plan around the schedule?
 Do support tickets include route and time, so we can measure impact?
 ## 8. Change log
-What you changed after loading the data (Task 2) and after training (Task 3), and why. When you change a decision in sections 1 to 7, record the old reasoning here instead of deleting it.
+It starts in Task 2
