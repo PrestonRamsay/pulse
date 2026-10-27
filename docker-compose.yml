@@ -1,0 +1,21 @@
+# Local Postgres for stop_events. Start with: docker compose up -d
+# On first start (empty volume) it runs src/schema.sql automatically.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pulse
+      POSTGRES_PASSWORD: pulse  # local dev only
+      POSTGRES_DB: pulse
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./src/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse -d pulse"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:

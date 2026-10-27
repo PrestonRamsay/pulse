@@ -38,4 +38,3 @@ What warning cap, and how much pessimism, is product comfortable with?
 How should frequent routes be handled, where riders don't plan around the schedule?
 Do support tickets include route and time, so we can measure impact?
 ## 8. Change log
-It starts in Task 2

@@ -1,0 +1,31 @@
+# Data (large; version with DVC rather than git)
+data/raw/
+data/interim/
+data/processed/
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+venv/
+.venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Experiment tracking
+mlruns/
+mlartifacts/
+
+# Editors / OS
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.~lock.*#
+
+# Claude Code local settings
+.claude/settings.local.json
