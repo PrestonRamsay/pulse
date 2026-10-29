@@ -1,5 +1,7 @@
 import pandas as pd
+import pytest
 
+import src.load_historical as lh
 from src.load_historical import prepare
 
 HEADER = ["service_date", "route_id", "direction_id", "half_trip_id", "stop_id", "time_point_id",
@@ -17,24 +19,21 @@ def run(*rows):
     return prepare(pd.DataFrame(list(rows), columns=HEADER))
 
 
-def test_route_leading_zero_is_stripped_to_match_api():
-    rows, _ = run(raw_row(route="01"), raw_row(route="SL1", stop="2"))
-    assert rows["route_id"].tolist() == ["1", "SL1"]
+def test_route_and_direction_keep_file_conventions():
+    rows, _ = run(raw_row(route="01"), raw_row(route="SL1", direction="Outbound", stop="2"))
+    assert rows["route_id"].tolist() == ["01", "SL1"]
+    assert rows["direction_id"].tolist() == ["Inbound", "Outbound"]
 
 
-def test_direction_text_becomes_api_direction_id():
-    rows, _ = run(raw_row(direction="Outbound"), raw_row(direction="Inbound", stop="2"))
-    assert rows["direction_id"].tolist() == [0, 1]
-
-
-def test_times_become_boston_timestamps():
+def test_times_become_wall_clock_timestamps_on_the_service_date():
     rows, _ = run(raw_row())
-    assert rows["scheduled"].iloc[0] == pd.Timestamp("2026-09-08 14:15", tz="America/New_York")
+    assert rows["scheduled"].iloc[0] == pd.Timestamp("2026-09-08 14:15")
+    assert rows["scheduled"].dt.tz is None
 
 
 def test_past_midnight_rolls_into_next_calendar_day():
     rows, _ = run(raw_row(scheduled="1900-01-02T00:45:00Z", actual="1900-01-02T00:55:00Z"))
-    assert rows["scheduled"].iloc[0] == pd.Timestamp("2026-09-09 00:45", tz="America/New_York")
+    assert rows["scheduled"].iloc[0] == pd.Timestamp("2026-09-09 00:45")
     assert str(rows["service_date"].iloc[0]) == "2026-09-08"
 
 
@@ -55,6 +54,24 @@ def test_missing_actual_is_kept_with_null():
     assert counts["no_actual"] == 1
 
 
-def test_duplicate_key_is_dropped():
+def test_duplicate_key_keeps_the_first_row():
     rows, counts = run(raw_row(), raw_row(actual="1900-01-01T14:30:00Z"))
-    assert len(rows) == 1 and counts["duplicate_in_chunk"] == 1
+    assert len(rows) == 1 and counts["duplicate_key"] == 1
+    assert rows["actual"].iloc[0] == pd.Timestamp("2026-09-08 14:20")
+
+
+def months_dir(tmp_path, monkeypatch, months):
+    for m in months:
+        (tmp_path / f"MBTA-Bus-Arrival-Departure-Times_{m}.csv").touch()
+    monkeypatch.setattr(lh, "RAW_DIR", tmp_path)
+
+
+def test_latest_months_picks_the_most_recent_consecutive_files(tmp_path, monkeypatch):
+    months_dir(tmp_path, monkeypatch, ["2025-12", "2026-01", "2026-02", "2026-03"])
+    assert [p.stem[-7:] for p in lh.latest_months(3)] == ["2026-01", "2026-02", "2026-03"]
+
+
+def test_latest_months_rejects_a_gap(tmp_path, monkeypatch):
+    months_dir(tmp_path, monkeypatch, ["2026-01", "2026-03", "2026-04"])
+    with pytest.raises(SystemExit):
+        lh.latest_months(3)

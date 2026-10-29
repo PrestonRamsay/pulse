@@ -1,7 +1,7 @@
-# Data (large; version with DVC rather than git)
-data/raw/
-data/interim/
-data/processed/
+# Data (large; version with DVC rather than git). Only the .dvc pointer files are committed.
+data/**
+!data/**/
+!data/**/*.dvc
 *.zip
 
 # Python
@@ -15,7 +15,8 @@ venv/
 # Jupyter
 .ipynb_checkpoints/
 
-# Experiment tracking
+# Experiment tracking (local store)
+mlflow.db
 mlruns/
 mlartifacts/
 

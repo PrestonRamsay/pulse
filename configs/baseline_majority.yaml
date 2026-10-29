@@ -1,0 +1,17 @@
+# Majority-class constant: predicts the most common train label for every row.
+# It ignores the features; they're listed so this config lines up with baseline_logreg.yaml.
+experiment: pulse-late-3min
+run_name: baseline_majority
+label: late
+features:
+  - route_id
+  - direction_id
+  - stop_id
+  - point_type
+  - standard_type
+  - hour
+  - day_of_week
+model:
+  type: majority
+  params:
+    strategy: most_frequent

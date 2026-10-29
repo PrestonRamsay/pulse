@@ -73,6 +73,7 @@ pluggy==1.7.0
 prometheus_client==0.26.0
 prompt_toolkit==3.0.53
 psutil==7.2.2
+psycopg[binary]==3.3.6
 pure_eval==0.2.4
 pycparser==3.12
 Pygments==2.21.0
@@ -106,5 +107,7 @@ webcolors==25.10.0
 webencodings==0.6.1
 websocket-client==1.9.2
 widgetsnbextension==4.0.16
-psycopg==3.3.6
-psycopg-binary==3.3.6
+scikit-learn==1.9.1
+mlflow==3.17.2
+dvc==3.67.1
+pyarrow==25.0.1

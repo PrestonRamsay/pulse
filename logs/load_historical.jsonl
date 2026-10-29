@@ -1,0 +1,3 @@
+{"file": "MBTA-Bus-Arrival-Departure-Times_2026-07.csv", "read": 2536378, "bad_key": 0, "out_of_range": 255, "duplicate_key": 591, "no_actual": 132301, "inserted": 2535498}
+{"file": "MBTA-Bus-Arrival-Departure-Times_2026-08.csv", "read": 2511333, "bad_key": 0, "out_of_range": 224, "duplicate_key": 406, "no_actual": 132386, "inserted": 2510673}
+{"file": "MBTA-Bus-Arrival-Departure-Times_2026-09.csv", "read": 2485473, "bad_key": 0, "out_of_range": 212, "duplicate_key": 1798, "no_actual": 142412, "inserted": 2483449}
