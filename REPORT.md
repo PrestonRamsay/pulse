@@ -65,10 +65,10 @@ is appended to `logs/pull_daily.log`.
 | Run | Service date | API records fetched | Timepoint rows kept | Rows inserted |
 |---|---|---:|---:|---:|
 | 1 | 2026-10-29 (Thu) | 384,472 | 92,348 | 92,149 |
-| 2 | 2026-10-30 (Fri) | _TODO_ | _TODO_ | _TODO_ |
+| 2 | 2026-10-30 (Fri) | 384,859 | 92,484 | 92,266 |
 
-92,149 rows is in line with a weekday in the files (about 91,400 on 8–10 September). The 199
-kept-but-not-inserted rows share a key with another trip at the same stop and minute.
+Both runs are in line with a weekday in the files (about 91,400 on 8–10 September). The 199 and
+218 kept-but-not-inserted rows share a key with another trip at the same stop and minute.
 
 ### Splits
 
