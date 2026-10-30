@@ -24,6 +24,8 @@ into the Postgres `stop_events` table by `python -m src.load_historical`.
 - `stop_events` is unique on `(service_date, route_id, direction_id, stop_id, scheduled)` and
   every insert uses `ON CONFLICT DO NOTHING`, so reruns are safe and the first row loaded for a
   key wins. The raw files are *not* unique on that key (see below); 2,873 rows (0.04%) lost.
+  Checked on 2026-10-30: reloading September inserted 0 of its 2,485,473 rows, and rerunning
+  that day's API pull inserted 0 of 92,484.
 
 ### What exploring the raw files decided
 
