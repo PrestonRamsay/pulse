@@ -1,0 +1,17 @@
+# logreg_history without the history count features. In logreg_history the counts grew as
+# the windows filled from 1 July, so September rows looked "later" than any train row and the
+# model over-predicted (mean 0.57 vs 0.49 actual). Rates only here.
+experiment: pulse-late-3min
+run_name: logreg_history_rates
+label: late
+features: [route_id, direction_id, stop_id, point_type, standard_type, hour, day_of_week, day_type]
+numeric_features: [scheduled_headway, time_point_order]
+history:
+  windows: [7, 14, 28, 56]
+  smoothing: 20.0
+  counts: false
+train:
+  burn_in_days: 14
+model:
+  type: logreg
+  params: {solver: lbfgs, C: 1.0, max_iter: 300}

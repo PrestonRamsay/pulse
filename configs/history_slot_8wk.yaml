@@ -1,0 +1,15 @@
+# Spec baseline (the bar to beat): each slot's late rate over the 56 service days before the
+# trip (slot = route, direction, stop, hour, day type), shrunk toward the stop, route and
+# network rates when the slot has little history. No training; the rate is the probability.
+experiment: pulse-late-3min
+run_name: history_slot_8wk
+label: late
+features: []
+history:
+  windows: [56]
+  smoothing: 20.0
+  counts: false
+model:
+  type: history_rate
+  params:
+    column: rate_slot_56d

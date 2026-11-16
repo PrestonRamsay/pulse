@@ -1,0 +1,13 @@
+# Gradient-boosted trees on schedule fields only (no history): the tree counterpart of
+# logreg_schedule, to separate what the architecture adds from what history adds.
+# Route is a native categorical (155 values); stop (1,163 values, over the 255 limit) is left out.
+experiment: pulse-late-3min
+run_name: gbt_schedule
+label: late
+features: [route_id, direction_id, point_type, standard_type, day_type]
+numeric_features: [hour, minute_of_day, day_of_week, scheduled_headway, time_point_order]
+train:
+  burn_in_days: 14
+model:
+  type: hgb
+  params: {learning_rate: 0.1, max_iter: 300, max_leaf_nodes: 31, min_samples_leaf: 100}

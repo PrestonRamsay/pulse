@@ -1,0 +1,14 @@
+# Spec baseline: one network-wide late rate for every trip, from the 56 service days before
+# each trip's own day. No training; the rate is the probability.
+experiment: pulse-late-3min
+run_name: history_network_8wk
+label: late
+features: []
+history:
+  windows: [56]
+  smoothing: 20.0
+  counts: false
+model:
+  type: history_rate
+  params:
+    column: rate_network_56d

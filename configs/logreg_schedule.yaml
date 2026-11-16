@@ -1,0 +1,13 @@
+# Logistic regression on the full schedule: baseline_logreg's features plus day type
+# (holidays mapped to their service pattern), scheduled headway and timepoint order.
+# No history features: isolates what the extra schedule fields add.
+experiment: pulse-late-3min
+run_name: logreg_schedule
+label: late
+features: [route_id, direction_id, stop_id, point_type, standard_type, hour, day_of_week, day_type]
+numeric_features: [scheduled_headway, time_point_order]
+train:
+  burn_in_days: 14
+model:
+  type: logreg
+  params: {solver: lbfgs, C: 1.0, max_iter: 300}
