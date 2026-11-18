@@ -6,7 +6,8 @@ Spec: [ml_spec.md](ml_spec.md). Results: [REPORT.md](REPORT.md).
 ## Layout
 
 ```
-src/        ingestion (load_historical, pull_daily), preparation (make_splits), training (train_baseline)
+src/        ingestion (load_historical, pull_daily), preparation (make_splits), features,
+            training (train_baseline for Task 2, train + models), calibrate, evaluate
 configs/    one YAML per training run
 data/       DVC-tracked; only the .dvc pointer files are in Git
 notebooks/  exploration only
@@ -73,7 +74,23 @@ MBTA_API_KEY=your_key
    mlflow ui --backend-store-uri sqlite:///mlflow.db
    ```
 
-The test split is held out until the final evaluation.
+6. Experiments (Task 3). Each config is one MLflow run, scored on validation, with
+   validation predictions saved to `data/preds/`. History features use only earlier
+   service days.
+
+   ```bash
+   python -m src.train configs/history_slot_8wk.yaml        # spec baseline, no training
+   python -m src.train configs/gbt_history.yaml             # gradient-boosted trees
+   python -m src.train configs/logreg_history_rates.yaml    # the chosen model
+   python -m src.calibrate logreg_history_rates             # rolling recalibration + threshold table
+   ```
+
+7. Final evaluation, run once. This is the only step that reads the test split. It
+   registers `pulse-latenet` and promotes it to Production if it beats every baseline:
+
+   ```bash
+   python -m src.evaluate logreg_history_rates --threshold 0.40 --register
+   ```
 
 ## Tests
 
