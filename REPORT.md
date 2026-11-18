@@ -329,7 +329,7 @@ trips, the threshold has to rise, and more late trips will be shown as on time.
 
 | Item | Value |
 |---|---|
-| Git commit | the commit that adds this section. The training run logged `32b0200-dirty` (trained before the Task 3 code was committed). Retraining with the committed code reproduces it exactly (below). |
+| Git commit | `f2e4463` (Task 3 code, configs and this report). The training run logged `32b0200-dirty` (trained before the Task 3 code was committed). Retraining with the committed code reproduces it exactly (below). |
 | DVC splits (md5) | train `9c76528a5a338970f93ee5e6e3928ce2`, val `e381cfc557b368f1f9360888e12f3d02`, test `b58c1d86758c22e0863529294b79a3cc` |
 | MLflow tracking | `sqlite:///mlflow.db`, artifacts in `mlruns/` |
 | MLflow experiment | `pulse-late-3min` |

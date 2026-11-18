@@ -5,7 +5,7 @@ Pipeline: MBTA API -> Postgres -> training. Spec in ml_spec.md.
 ## Commands
 - Activate env: venv\Scripts\activate (Windows; Mac/Linux: source venv/bin/activate)
 - Run tests: pytest
-- Run ingestion once: python -m src.ingest
+- Run ingestion once: python -m src.load_historical (historical files), python -m src.pull_daily (daily API pull)
 
 ## Rules
 - "Late" = strictly more than 3 minutes after scheduled time.
