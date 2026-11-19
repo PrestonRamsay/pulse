@@ -1,0 +1,27 @@
+# Neural network on schedule fields: one embedding per categorical input,
+# plus four numeric inputs, through a small feed-forward network.
+# Inputs come from the frozen splits only (src/latenet_data.py).
+experiment: pulse-late-3min
+run_name: latenet_base
+seed: 0
+
+model:
+  embedding_dims:        # size of each learned vector; vocab sizes are 155 / 1163 / 24 / 7 / 3
+    route_id: 16
+    stop_id: 32
+    hour: 8
+    day_of_week: 4
+    point_type: 2
+  hidden: [128, 64]      # two hidden layers
+  dropout: 0.1
+
+train:
+  batch_size: 8192
+  learning_rate: 0.001
+  weight_decay: 0.0
+  max_epochs: 20
+  patience: 3            # stop after 3 epochs without a better validation AUC
+  min_delta: 0.0005      # an improvement smaller than this doesn't count
+  threshold: 0.5         # for validation accuracy
+
+output: models/latenet.pt
