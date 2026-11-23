@@ -30,3 +30,6 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# latenet sweep weights (only models/latenet.pt is versioned, via DVC)
+models/sweep/

@@ -1,10 +1,9 @@
 """Inputs for the latenet neural network, built from the frozen splits only."""
 
-"""Inputs for the latenet neural network, built from the frozen splits only."""
-
 import numpy as np
 import pandas as pd
 from src.db import ROOT
+from src.features import add_day_type, add_history_features, history_feature_names
 
 import torch
 from torch.utils.data import DataLoader, TensorDataset
@@ -21,6 +20,41 @@ def load_split(name):
     """Read one frozen split ('train' or 'val'), keeping only the model's columns."""
     columns = CATEGORICAL + FLAGS + NUMERIC + [LABEL]
     return pd.read_parquet(SPLIT_DIR / f"{name}.parquet", columns=columns)
+
+def load_train_val(cfg):
+    """Train and val inputs. With a `history` block in the config, also adds the recent
+    late rates from src/features.py; each row uses only earlier service days.
+    Returns (train, val, history_cols)."""
+    h = cfg.get("history")
+    if not h:
+        return load_split("train"), load_split("val"), []
+    train = pd.read_parquet(SPLIT_DIR / "train.parquet")
+    val = pd.read_parquet(SPLIT_DIR / "val.parquet")
+    both = add_day_type(pd.concat([train, val], ignore_index=True))
+    both = add_history_features(both, both, windows=tuple(h["windows"]), smoothing=h["smoothing"])
+    history_cols = history_feature_names(tuple(h["windows"]), counts=False)
+    is_val = both["service_date"] >= val["service_date"].min()
+    train, val = both[~is_val], both[is_val]
+    start = train["service_date"].min() + pd.Timedelta(days=h["burn_in_days"])
+    train = train[train["service_date"] >= start]
+    keep = CATEGORICAL + FLAGS + NUMERIC + history_cols + [LABEL]
+    return train[keep], val[keep], history_cols
+
+def load_eval_split(cfg, name):
+    """One split ('val' or 'test') for scoring, with history rates if the model used them.
+    History for each row comes only from earlier service days, the same as in training.
+    Scoring 'val' reads train and val only; the test file is opened only for 'test'."""
+    cols = CATEGORICAL + FLAGS + NUMERIC + [LABEL, "service_date"]
+    h = cfg.get("history")
+    if not h:
+        return pd.read_parquet(SPLIT_DIR / f"{name}.parquet", columns=cols)
+    order = ["train", "val", "test"]
+    frames = [pd.read_parquet(SPLIT_DIR / f"{n}.parquet") for n in order[: order.index(name) + 1]]
+    both = add_day_type(pd.concat(frames, ignore_index=True))
+    both = add_history_features(both, both, windows=tuple(h["windows"]), smoothing=h["smoothing"])
+    history_cols = history_feature_names(tuple(h["windows"]), counts=False)
+    target = both[both["service_date"] >= frames[-1]["service_date"].min()]
+    return target[cols + history_cols]
 
 def build_vocab(train):
     """One {value: index} table per categorical column, from the train split only.
@@ -39,15 +73,25 @@ def encode(df, vocab):
         out[col] = df[col].astype(str).map(vocab[col]).fillna(0).astype("int64").to_numpy()
     return out
 
-def build_scaling(train):
-    """Numbers needed to scale timepoint order, from the train split only."""
+def logit(p):
+    p = np.clip(p, 1e-3, 1 - 1e-3)
+    return np.log(p / (1 - p))
+
+
+def build_scaling(train, history_cols=()):
+    """Numbers needed to scale the numeric inputs, from the train split only."""
     order = train["time_point_order"].astype("float64")
-    return {"time_point_order_fill": float(order.median()),
-            "time_point_order_max": float(order.max())}
+    scaling = {"time_point_order_fill": float(order.median()),
+               "time_point_order_max": float(order.max()),
+               "history": {}}
+    for col in history_cols:
+        z = logit(train[col].to_numpy(dtype="float64"))
+        scaling["history"][col] = [float(z.mean()), float(z.std())]
+    return scaling
 
 
 def numeric_inputs(df, scaling):
-    """Direction, weekend and standard type as 0/1 flags, plus scaled timepoint order."""
+    """Flags, scaled timepoint order, and (if trained with history) standardized late rates."""
     order = df["time_point_order"].astype("float64").fillna(scaling["time_point_order_fill"])
     columns = [
         df["direction_id"].astype(str) == "Inbound",
@@ -55,12 +99,14 @@ def numeric_inputs(df, scaling):
         df["standard_type"].astype(str) == "Headway",
         order / scaling["time_point_order_max"],
     ]
+    for col, (mean, std) in scaling.get("history", {}).items():
+        columns.append((logit(df[col].to_numpy(dtype="float64")) - mean) / std)
     return np.column_stack(columns).astype("float32")
 
 def make_loader(df, vocab, scaling, batch_size, shuffle):
     """Tensors for one split: category indexes, numeric inputs and labels, in batches."""
     idx = encode(df, vocab)
     cat = torch.from_numpy(np.column_stack([idx[c] for c in CATEGORICAL]))   # int64, one column per category
-    num = torch.from_numpy(numeric_inputs(df, scaling))                       # float32, 4 columns
+    num = torch.from_numpy(numeric_inputs(df, scaling))                       # float32, 4 columns + 1 per history rate
     y = torch.from_numpy(df[LABEL].to_numpy().astype("float32"))             # 0.0 / 1.0
     return DataLoader(TensorDataset(cat, num, y), batch_size=batch_size, shuffle=shuffle)

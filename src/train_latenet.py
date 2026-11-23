@@ -19,7 +19,7 @@ import torch
 import yaml
 from sklearn.metrics import accuracy_score, roc_auc_score
 
-from src.latenet_data import build_scaling, build_vocab, load_split, make_loader
+from src.latenet_data import build_scaling, build_vocab, load_train_val, make_loader
 from src.latenet_model import build_model, count_parameters
 from src.train import ARTIFACT_ROOT, TRACKING_URI, dvc_md5, flatten, git_commit
 
@@ -62,8 +62,8 @@ def main(argv=None):
     torch.manual_seed(cfg["seed"])
     np.random.seed(cfg["seed"])
 
-    train, val = load_split("train"), load_split("val")
-    vocab, scaling = build_vocab(train), build_scaling(train)
+    train, val, history_cols = load_train_val(cfg)
+    vocab, scaling = build_vocab(train), build_scaling(train, history_cols)
     train_loader = make_loader(train, vocab, scaling, t["batch_size"], shuffle=True)
     val_loader = make_loader(val, vocab, scaling, t["batch_size"], shuffle=False)
 
@@ -88,6 +88,7 @@ def main(argv=None):
             "rows_train": len(train),
             "rows_val": len(val),
             "n_parameters": count_parameters(model),
+            "n_numeric": n_numeric,
         })
         mlflow.log_artifact(str(args.config), artifact_path="config")
         with tempfile.TemporaryDirectory() as tmp:

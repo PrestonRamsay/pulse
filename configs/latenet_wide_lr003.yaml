@@ -1,0 +1,27 @@
+# Sweep combination: latenet_wide (hidden [256, 128]) + latenet_lr003 (learning rate 0.003).
+# Schedule inputs only. Was configs/final.yaml until latenet_history won (MLflow run 9a85a0b5..., logged as "final").
+# Inputs come from the frozen splits only (src/latenet_data.py).
+experiment: pulse-late-3min
+run_name: latenet_wide_lr003
+seed: 0
+
+model:
+  embedding_dims:        # size of each learned vector; vocab sizes are 155 / 1163 / 24 / 7 / 3
+    route_id: 16
+    stop_id: 32
+    hour: 8
+    day_of_week: 4
+    point_type: 2
+  hidden: [256, 128]     # two hidden layers
+  dropout: 0.1
+
+train:
+  batch_size: 8192
+  learning_rate: 0.003 
+  weight_decay: 0.0
+  max_epochs: 20
+  patience: 3            # stop after 3 epochs without a better validation AUC
+  min_delta: 0.0005      # an improvement smaller than this doesn't count
+  threshold: 0.5         # for validation accuracy
+
+output: models/sweep/latenet_wide_lr003.pt
