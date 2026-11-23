@@ -126,7 +126,10 @@ Both trained on train, scored on validation, logged to MLflow experiment `pulse-
 All runs are in MLflow experiment `pulse-late-3min`, trained on train (1 July – 31 August;
 runs with history features drop the first 14 days, whose windows are nearly empty) and scored
 on validation (1–15 September). The test split was not read until §4. Configs are in
-`configs/<run name>.yaml`; the run table is exported to `mlflow_runs.csv`.
+`configs/<run name>.yaml`; the winner's is also saved as `configs/final.yaml` (identical
+settings to `configs/logreg_history_rates.yaml`). The run table, best validation AUC first,
+is exported to `mlflow_runs.csv`. There are 20 runs in all: the 10 below and the 10
+neural-network runs further down.
 
 ### Runs
 
@@ -177,6 +180,50 @@ shrunk toward the next-coarser level (pseudo-count 20).
   match their actual late rate, using only earlier days. On 8–15 September it cut
   calibration error to 0.052 for the logistic regression and 0.061 for `gbt_history`.
 
+### Neural network (latenet)
+
+A small feed-forward network (`src/latenet_model.py`, trained by `src/train_latenet.py`):
+
+- **Inputs:** learned embeddings for route (16 dimensions), stop (32), hour (8), day of week
+  (4) and point type (2). Vocabularies come from train only, with index 0 for unseen values.
+  Numeric inputs are direction, weekend, standard type and scaled timepoint order.
+- **Model:** ReLU hidden layers with dropout and one logit output, trained with Adam and
+  binary cross-entropy.
+- **Training:** each epoch is logged to MLflow (`step=epoch`). Early stopping on validation
+  AUC (patience 3) keeps the best epoch's weights.
+
+The sweep changed one setting at a time from `latenet_base`:
+
+| Run | Change | Best val AUC | Best epoch |
+|---|---|---:|---:|
+| `latenet_base` | hidden [128, 64], dropout 0.1, lr 0.001, batch 8,192 | 0.7055 | 11 |
+| `latenet_wide` | hidden [256, 128] | 0.7080 | 11 |
+| `latenet_lr003` | learning rate 0.003 | 0.7078 | 7 |
+| `latenet_deep` | hidden [128, 64, 32] | 0.7069 | 13 |
+| `latenet_batch32k` | batch 32,768 | 0.7040 | 12 |
+| `latenet_dropout03` | dropout 0.3 | 0.7035 | 9 |
+| `latenet_emb_small` | embeddings halved | 0.7009 | 7 |
+| `latenet_wide_lr003` | wide + lr 0.003 | 0.7081 | 7 |
+| `latenet_history` | wide + lr 0.003 + the 16 late rates (log-odds, standardized on train) | 0.7163 | 1 |
+| **`latenet_final`** | `latenet_history`, rerun from a clean commit | **0.7163** | **1** |
+
+- **The sweep was flat.** Every change moved AUC by less than 0.005. Width and a higher
+  learning rate helped a little, and smaller embeddings, heavier dropout and bigger batches
+  hurt a little. No run hit the 20-epoch cap.
+- **On schedule fields alone, the net is the best model** (0.708 against 0.706 for trees and
+  0.683 for logistic regression). Embeddings learn route, stop and hour interactions without
+  hand-built features.
+- **History added 0.008 AUC, but the net peaked in epoch 1.** After that, validation AUC fell
+  every epoch while train loss kept falling. In September the history inputs sit above
+  anything seen in summer (the network rates are 2.5–3 train standard deviations high). The
+  more closely the net fits summer, the worse it extrapolates. It also under-predicts more
+  than the logistic regression: its mean prediction is 0.395 against 0.487 actual. The logistic
+  regression is linear in the same inputs, so it extrapolates smoothly.
+- **Why it was not chosen:** it scored 0.010 AUC below `logreg_history_rates` on validation.
+  It is less stable (best at epoch 1), 70 times larger (93,649 parameters against 1,357) and
+  less well calibrated. The test split was not used for this choice. For comparison, `latenet_final`
+  was scored on test once, afterwards (§4).
+
 ### Final architecture
 
 `logreg_history_rates`, registered as `pulse-latenet`:
@@ -190,7 +237,8 @@ shrunk toward the next-coarser level (pseudo-count 20).
   the previous week's predictions and outcomes), then a 0.40 warning threshold (§5).
 
 It ties the trees on AUC, is better calibrated before and after recalibration, and each
-weight can be read directly. That's why it was chosen over `gbt_history`.
+weight can be read directly. That's why it was chosen over `gbt_history`. It beats the neural
+network by 0.010 AUC on validation at a seventieth of the size.
 
 ### High-cardinality features (route, stop)
 
@@ -285,6 +333,67 @@ One route (37) is on both lists, and every route the model ranks worst really is
 late against a 48% network average). The routes it misses from the actual top 5 are all
 predicted at 62–67%, so they would still get warnings; it ranks them just below the top.
 Its predicted spread is compressed: the worst routes run a few points later than predicted.
+Across all 122 routes with at least 2,000 test rows, the Pearson correlation between
+predicted and actual route late rates is **0.916** (0.903 over the 78 routes with at least
+5,000 rows). So the ranking holds at route level as well as trip level. This was computed
+from the saved test predictions (`data/preds/logreg_history_rates_test.parquet`); the model was
+not re-scored.
+
+### The neural network on test (scored once, not used for the choice)
+
+`latenet_final` (MLflow run `1ac5d213…`) was scored once on test with
+`python -m src.evaluate_latenet test --threshold 0.35 --run-id <run id>`, after the logistic
+regression had been chosen. The 0.35 threshold was fixed on validation beforehand. The net has
+no recalibration step. Its metrics are logged on its run.
+
+| | Validation | Test |
+|---|---:|---:|
+| AUC-ROC | 0.716 | 0.742 |
+| PR-AUC | 0.696 | 0.715 |
+| Accuracy at 0.5 | 64.4% | **62.8%** |
+| Accuracy at 0.35 | 65.6% | 67.1% |
+| Recall at 0.35 | 68.4% | 54.9% |
+| Share flagged at 0.35 | 52.3% | 37.6% |
+| "On time" but late at 0.35 | 32.3% | 35.0% |
+| Mean predicted vs. actual late rate | 0.395 vs. 0.487 | **0.311 vs. 0.483** |
+| Route Pearson r (≥ 5,000 rows) | 0.928 | 0.923 |
+
+Its **ranking held**: test AUC 0.742 is slightly above the logistic regression's 0.738, and
+route correlation stayed at 0.92. But its **probability level collapsed**. By late September
+the history inputs are even further outside the summer range, and instead of following them
+up, the net's output fell. It under-predicts in every hour of the day by 10–27 points, worst
+at 8am (28% predicted against 55% actual). So a fixed threshold flags fewer buses and catches
+fewer late ones. It would miss the 65% accuracy bar at 0.5, while the chosen model clears it
+(67.3%). Rolling recalibration would most likely fix the level, since the ranking is intact,
+but it was not tried on test, so as not to tune on test.
+
+### Serving latency
+
+`python -m src.latency_check` loads the DVC-tracked model (`models/pulse-latenet`), builds
+one real validation departure's inputs, and times 200 single-row predictions on CPU after 10
+warm-up calls. Each call is `predict_proba`, then the recalibration shift, then the threshold.
+
+| Measured 2026-11-23 | |
+|---|---|
+| CPU | Intel64 Family 6 Model 191 (laptop), Windows 11, CPU only |
+| Single prediction | **median 12.8 ms**, p95 14.2 ms, max 17.0 ms |
+| Model load | 2.9 s, once at startup |
+
+**It passes the 200 ms bar** with a wide margin. The late rates and the day's
+recalibration shift are computed in a daily batch and looked up at serving time, so they
+aren't in the per-request time (building them for one row from the raw splits takes about
+5 s).
+
+### Against the acceptance bars
+
+- **Model quality:** test accuracy at 0.5 is **67.3%** (bar 65%), and AUC is **0.738** (bar
+  0.70). That's 15.6 points above the test weeks' majority baseline (51.7%). At the 0.40
+  operating threshold, accuracy is 66.2%, traded for 78% recall.
+- **Serving-safe features and time-based splits:** every feature is known the day before (the
+  late rates use only earlier service days, and this is tested). Splits are by service date.
+  Each candidate model was scored on test exactly once: the logistic regression on
+  2026-11-18, and the net on 2026-11-23 for comparison.
+- **Latency:** 12.8 ms median (bar 200 ms).
 
 ## 5. Threshold Recommendation
 
@@ -310,10 +419,31 @@ rider-facing number. Validation figures are for all of 1–15 September after re
 0.60 was only tabulated on 8–15 September (72.8% precision). Test figures are shown for
 information only and were not used to choose.
 
-- **0.30** protects riders most (only 22–24% of "on time" trips late) but warns on three
-  trips in four, which risks warnings being ignored.
-- **0.50** warns on fewer than half of trips but lets a third of "on time" trips run late.
-- **0.40** sits between them and moved very little from validation to test.
+In product terms, on validation:
+
+- **At 0.40 (recommended), we catch 76% of late buses at the cost of flagging 44% of on-time
+  ones.** 29% of trips shown as "Usually on time" still run late.
+- **At 0.30, we catch 87% of late buses but flag 60% of on-time ones.** This protects riders
+  most (24% of "on time" trips late), but it warns on three trips in four, which risks
+  warnings being ignored.
+- **At 0.50, we catch 63% of late buses and flag 30% of on-time ones.** It warns on fewer than
+  half of trips but lets a third of "on time" trips run late.
+
+On test, the same thresholds gave 78% / 45% at 0.40, 89% / 61% at 0.30 and 65% / 31% at 0.50
+(late buses caught / on-time buses flagged). Every row moved by 2 points or less. The
+intermediate rows: 0.35 caught 81% and flagged 52% on validation; 0.45 caught 70% and flagged
+37%.
+
+**What moved from validation to test:** very little at 0.40. The warned share went from
+59.5% to 61.1%, recall from 75.7% to 78.2%, and "on time" but late fell from 29.3% to 27.0%.
+That stability comes from the rolling recalibration. The un-recalibrated neural network shows
+what happens without it: its share flagged at a fixed 0.35 fell from 52% to 38% (§4).
+
+**How often to re-pick:** the threshold stays at 0.40 for this release; it was not moved
+after the test results. We propose re-picking it **monthly**, when each new month of labelled
+files arrives, on the most recent two labelled weeks. Recalibration stays daily. The
+threshold is re-picked in the same way it was chosen here (pessimistic lean, within the warning
+cap), and the new value is logged on the registered model version as a tag.
 
 **For the product team:** no threshold makes "Usually on time" a strong promise. Even at
 0.30, about one in five such trips runs late. We recommend copy that describes likelihood
@@ -329,36 +459,46 @@ trips, the threshold has to rise, and more late trips will be shown as on time.
 
 | Item | Value |
 |---|---|
-| Git commit | `f2e4463` (Task 3 code, configs and this report). The training run logged `32b0200-dirty` (trained before the Task 3 code was committed). Retraining with the committed code reproduces it exactly (below). |
+| Git commit | Code, configs and this report: the commit that adds `configs/final.yaml` with the logistic regression (`git log -1 -- configs/final.yaml`). The winning run logged `32b0200-dirty` (it was trained before the Task 3 code was committed). Retraining with the committed code reproduces it exactly (below). |
 | DVC splits (md5) | train `9c76528a5a338970f93ee5e6e3928ce2`, val `e381cfc557b368f1f9360888e12f3d02`, test `b58c1d86758c22e0863529294b79a3cc` |
+| DVC model | `models/pulse-latenet` (the MLflow model of version 1), md5 `22190144455cc3bf4750c8794b8687b8.dir`. The neural network's weights are also tracked: `models/latenet.pt`, md5 `fcde379666e7ae31a779328122b4c4ea`. |
 | MLflow tracking | `sqlite:///mlflow.db`, artifacts in `mlruns/` |
-| MLflow experiment | `pulse-late-3min` |
-| Winning run | `logreg_history_rates`, run id `10194bd134054df4bef5ef658e3dfff3` |
-| Registered model | `pulse-latenet` **version 1**, stage **Production**, alias `production` |
+| MLflow experiment | `pulse-late-3min` (20 runs) |
+| Winning run | `logreg_history_rates`, run id `10194bd134054df4bef5ef658e3dfff3`, config `configs/final.yaml` |
+| Registered model | `pulse-latenet` **version 1**, moved through **Staging** to **Production**, alias `production`. Its description names the source run. |
 | Model version tags | threshold 0.4, recalibration rolling 7-day, test AUC 0.7375 |
 
-Reproduce from the frozen splits (`dvc pull` or `python -m src.make_splits`):
+Reproduce from a fresh clone (README.md has the setup):
 
 ```bash
-python -m src.train configs/logreg_history_rates.yaml
+dvc pull                                   # frozen splits and the model
+python -m src.train configs/final.yaml     # the winning run: validation AUC 0.7255
 python -m src.calibrate logreg_history_rates
-python -m src.evaluate logreg_history_rates --threshold 0.40 --register
+python -m src.evaluate logreg_history_rates --threshold 0.40   # test, once per run
+python -m src.latency_check                # single-prediction latency
 ```
 
-1. `src.train` builds the history features, trains on train, scores validation and logs the
-   run and model.
+1. `src.train` builds the history features, trains on train, scores validation, and logs the
+   run and model. `configs/final.yaml` keeps the run name `logreg_history_rates`, so the
+   later steps find the fresh run.
 2. `src.calibrate` applies the rolling recalibration to the validation predictions and logs
    the calibration metrics and threshold table.
 3. `src.evaluate` is the only script that reads the test split. It refuses to run twice for
-   the same run (pass `--force` only to deliberately re-evaluate). It then registers and
-   promotes the model if it beats every baseline on test.
+   the same run (pass `--force` only to deliberately re-evaluate). With `--register`, it also
+   registers and promotes the model if it beats every baseline on test. A reproduction doesn't
+   need that flag.
+
+The neural network reproduces with
+`python -m src.train_latenet configs/latenet_final.yaml`, which gives validation AUC 0.7163
+at epoch 1. That run was retrained once to check this, and matched to four decimals.
 
 **Checked on 2026-11-18:** retraining `configs/logreg_history_rates.yaml` with the current code,
 without logging, gave validation AUC 0.725536 and accuracy 0.662159, identical to the logged
 run. lbfgs stops at its 300-iteration cap (a convergence warning, as in Task 2). The fit is
 deterministic, so the result reproduces exactly; raising `max_iter` is a possible next tweak.
 
-Load the production model with `mlflow.sklearn.load_model("models:/pulse-latenet@production")`.
+Load the production model with `mlflow.sklearn.load_model("models:/pulse-latenet@production")`,
+or from the DVC copy with `mlflow.sklearn.load_model("models/pulse-latenet")`.
 It expects the feature columns built by `src.train.load_frames`. The rolling recalibration
 and threshold are applied outside it.
 
@@ -392,9 +532,12 @@ and threshold are applied outside it.
    features and recalibration are truly "up to yesterday" in production.
 4. **More history** (12+ months) and retraining on a rolling window, so the model has seen
    seasonal shifts instead of only reacting to them.
-5. **A small neural network** with route and stop embeddings, the deferred architecture
-   comparison. Given that trees didn't gain over logistic regression once history was in,
-   expect a small gain.
+5. **Make the neural network serveable.** It ranks as well as the logistic regression (test
+   AUC 0.742), but its probabilities sit far too low (§4). Next steps: give it the same
+   rolling recalibration, train it on more than one season so the history inputs aren't
+   out of range, and stop it training before it overfits summer (it peaked in epoch 1). Its
+   real advantage, learning interactions, should pay off once there are new kinds of input
+   to combine: weather, planned detours, school days.
 6. **An unseen-routes check** (spec §5) to measure cold-start performance for new routes.
 
 ### If "late" meant five minutes instead of three

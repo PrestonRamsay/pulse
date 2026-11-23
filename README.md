@@ -7,7 +7,10 @@ Spec: [ml_spec.md](ml_spec.md). Results: [REPORT.md](REPORT.md).
 
 ```
 src/        ingestion (load_historical, pull_daily), preparation (make_splits), features,
-            training (train_baseline for Task 2, train + models), calibrate, evaluate
+            training (train_baseline for Task 2, train + models), calibrate, evaluate,
+            the neural network (latenet_data, latenet_model, train_latenet, evaluate_latenet),
+            latency_check
+models/     DVC-tracked: pulse-latenet (the production model), latenet.pt (the best net)
 configs/    one YAML per training run
 data/       DVC-tracked; only the .dvc pointer files are in Git
 notebooks/  exploration only
@@ -35,7 +38,35 @@ MBTA_API_KEY=your_key
 `DATABASE_URL=postgresql://pulse:pulse@localhost:5432/pulse`. The scripts create the
 `stop_events` table from `src/schema.sql` if it doesn't exist.
 
-## From a fresh clone to the baselines
+## From a fresh clone to the winning run
+
+After the setup above (the venv and `pip install -r requirements.txt`; no database or `.env`
+is needed for this path):
+
+```bash
+dvc pull
+python -m src.train configs/final.yaml
+```
+
+- `dvc pull` fetches the frozen train/val/test splits and the registered model
+  (`models/pulse-latenet`).
+- The second command retrains the winning run (`logreg_history_rates`, logistic regression on
+  schedule fields + recent late rates) and logs it to a new local MLflow store. It prints
+  validation **AUC 0.7255, accuracy 0.6622**, the same as the logged run, because the fit is
+  deterministic. It takes about 2 minutes.
+
+Optional follow-ups, each one command:
+
+```bash
+python -m src.calibrate logreg_history_rates                   # rolling recalibration + threshold table
+python -m src.evaluate logreg_history_rates --threshold 0.40   # the single test evaluation (AUC 0.738)
+python -m src.latency_check                                    # single-prediction CPU latency (~13 ms)
+mlflow ui --backend-store-uri sqlite:///mlflow.db              # browse the runs ("Model training" view)
+```
+
+Results and the reasoning behind every choice: [REPORT.md](REPORT.md).
+
+## From raw data to the baselines
 
 1. Get the raw files (one zip per year; one CSV per month):
 
@@ -81,8 +112,16 @@ MBTA_API_KEY=your_key
    ```bash
    python -m src.train configs/history_slot_8wk.yaml        # spec baseline, no training
    python -m src.train configs/gbt_history.yaml             # gradient-boosted trees
-   python -m src.train configs/logreg_history_rates.yaml    # the chosen model
+   python -m src.train configs/final.yaml                   # the chosen model (= logreg_history_rates)
    python -m src.calibrate logreg_history_rates             # rolling recalibration + threshold table
+   ```
+
+   The neural network (latenet) is trained per config with `src.train_latenet`. Its
+   validation tables come from `src.evaluate_latenet`:
+
+   ```bash
+   python -m src.train_latenet configs/latenet_final.yaml   # best net, val AUC 0.716
+   python -m src.evaluate_latenet val --threshold 0.35      # metrics, calibration by hour, routes, thresholds
    ```
 
 7. Final evaluation, run once. This is the only step that reads the test split. It

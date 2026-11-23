@@ -6,6 +6,12 @@
 
 import argparse
 from pathlib import Path
+import tempfile
+from datetime import date
+
+import mlflow
+
+from src.train import TRACKING_URI
 
 import pandas as pd
 import torch
@@ -71,16 +77,48 @@ def threshold_rows(y, p, thresholds=THRESHOLDS):
                      "unwarned_late": y[~warn].mean()})
     return pd.DataFrame(rows)
 
+def check_run(run_id, saved):
+    """Refuse a second test scoring, and check models/latenet.pt really came from this run."""
+    mlflow.set_tracking_uri(TRACKING_URI)
+    run = mlflow.MlflowClient().get_run(run_id)
+    if "test_auc_roc" in run.data.metrics:
+        raise SystemExit(f"run {run_id} already has test metrics: the test split is scored once.")
+    if abs(run.data.metrics["best_val_auc_roc"] - saved["best_val_auc_roc"]) > 1e-9:
+        raise SystemExit("this model file doesn't match the run's best_val_auc_roc; wrong run id or file.")
+
+
+def log_test(run_id, threshold, y, p, df, route_r):
+    """Put the test metrics and tables on the winning run, so run history and report agree."""
+    tn, fp, fn, tp = confusion_matrix(y, p >= threshold).ravel()
+    metrics = {f"test_{k}": float(v) for k, v in headline(y, p, threshold).items()}
+    metrics.update({"test_tn": tn, "test_fp": fp, "test_fn": fn, "test_tp": tp,
+                    "test_late_rate": y.mean(), "test_mean_pred": p.mean(),
+                    "test_threshold": threshold, "test_route_pearson": route_r})
+    with mlflow.start_run(run_id=run_id):
+        mlflow.log_metrics({k: float(v) for k, v in metrics.items()})
+        mlflow.set_tag("test_scored_on", str(date.today()))
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, table in [("by_hour", by_hour(df)), ("thresholds", threshold_rows(y, p))]:
+                path = Path(tmp) / f"test_{name}.csv"
+                table.to_csv(path)
+                mlflow.log_artifact(str(path), artifact_path="test")
+    print(f"\nlogged test metrics to run {run_id}")
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("split", choices=["val", "test"])
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--model", type=Path, default=Path("models/latenet.pt"))
+    parser.add_argument("--run-id", help="the winning MLflow run; required for test")
     args = parser.parse_args(argv)
-    if args.split == "test":
-        raise SystemExit("test is scored once, with --run-id (part 4). Use val for now.")
+    if args.split == "test" and not args.run_id:
+        raise SystemExit("test is scored once, and only with --run-id of the winning run.")
+    if args.run_id and args.split != "test":
+        raise SystemExit("--run-id is only for the single test run.")
 
     df, saved = score_split(args.model, args.split)
+    if args.run_id:
+        check_run(args.run_id, saved)
     y, p = df["late"].to_numpy(), df["proba"].to_numpy()
     print(f"{args.model} ({saved['config']['run_name']}) on {args.split}: {len(df):,} rows, "
           f"late rate {y.mean():.3f}, mean predicted {p.mean():.3f}")
@@ -101,6 +139,9 @@ def main(argv=None):
 
     print("\nThreshold table")
     print(threshold_rows(y, p).round(3).to_string(index=False))
+
+    if args.run_id:
+        log_test(args.run_id, args.threshold, y, p, df, r)
 
 
 if __name__ == "__main__":

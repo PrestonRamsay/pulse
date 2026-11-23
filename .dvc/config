@@ -1,2 +1,5 @@
 [core]
     autostage = false
+    remote = origin
+['remote "origin"']
+    url = https://dagshub.com/PrestonRamsay/pulse.dvc

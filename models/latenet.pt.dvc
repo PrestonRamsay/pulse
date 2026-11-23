@@ -1,5 +1,5 @@
 outs:
-- md5: 629fc887fe2c09a3c3aadbe202c3655a
-  size: 254594
+- md5: fcde379666e7ae31a779328122b4c4ea
+  size: 402178
   hash: md5
   path: latenet.pt

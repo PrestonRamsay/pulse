@@ -21,7 +21,7 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 
 from src.latenet_data import build_scaling, build_vocab, load_train_val, make_loader
 from src.latenet_model import build_model, count_parameters
-from src.train import ARTIFACT_ROOT, TRACKING_URI, dvc_md5, flatten, git_commit
+from src.train import ARTIFACT_ROOT, TRACKING_URI, dvc_md5, export_runs, flatten, git_commit
 
 
 def load_config(path):
@@ -132,6 +132,7 @@ def main(argv=None):
         mlflow.log_metrics({"best_epoch": best_epoch, "best_val_auc_roc": best_auc})
         mlflow.pytorch.log_model(model, name="model", serialization_format="pickle")
         print(f"best epoch {best_epoch}: val_auc_roc={best_auc:.4f}")
+    export_runs(cfg["experiment"])
 
 
 if __name__ == "__main__":

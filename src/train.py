@@ -160,7 +160,16 @@ def main(argv=None):
         mlflow.set_tag("val_predictions", pred_path.relative_to(ROOT).as_posix())
         print(f"{cfg['run_name']} ({run.info.run_id}): " + ", ".join(f"{k}={v:.4f}" for k, v in metrics.items()))
 
-    runs = mlflow.search_runs(experiment_names=[cfg["experiment"]])
+    export_runs(cfg["experiment"])
+
+
+def export_runs(experiment):
+    """Write every run to mlflow_runs.csv, best validation AUC first (best epoch for the nets)."""
+    runs = mlflow.search_runs(experiment_names=[experiment])
+    runs.insert(1, "run_name", runs["tags.mlflow.runName"])
+    best = runs["metrics.best_val_auc_roc"] if "metrics.best_val_auc_roc" in runs else runs["metrics.val_auc_roc"]
+    runs.insert(2, "val_auc_for_ranking", best.fillna(runs["metrics.val_auc_roc"]))
+    runs = runs.sort_values("val_auc_for_ranking", ascending=False)
     runs.to_csv(RUNS_CSV, index=False)
     print(f"wrote {len(runs)} runs to {RUNS_CSV.name}")
 

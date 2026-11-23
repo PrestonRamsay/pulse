@@ -1,34 +1,21 @@
-# The winning configuration: latenet_wide + latenet_lr003 + history (chosen on validation, threshold 0.35).
-# Same as configs/latenet_history.yaml, rerun from a clean commit and saved to models/latenet.pt.
-# Neural network: one embedding per categorical input, plus 4 schedule flags and
-# 16 recent late rates (network, route, stop, slot x 7/14/28/56 days, earlier days only),
-# through a small feed-forward network. Inputs come from the frozen splits only (src/latenet_data.py).
+# The winning configuration: identical to configs/logreg_history_rates.yaml (MLflow run
+# 10194bd1..., registered as pulse-latenet v1). Chosen on validation over every other run,
+# including the neural network (configs/latenet_final.yaml). Serve with rolling 7-day
+# recalibration and a 0.40 warning threshold (REPORT.md §5).
+# logreg_history without the history count features. In logreg_history the counts grew as
+# the windows filled from 1 July, so September rows looked "later" than any train row and the
+# model over-predicted (mean 0.57 vs 0.49 actual). Rates only here.
 experiment: pulse-late-3min
-run_name: final
-seed: 0
-
-model:
-  embedding_dims:        # size of each learned vector; vocab sizes are 155 / 1163 / 24 / 7 / 3
-    route_id: 16
-    stop_id: 32
-    hour: 8
-    day_of_week: 4
-    point_type: 2
-  hidden: [256, 128]     # two hidden layers
-  dropout: 0.1
-
-train:
-  batch_size: 8192
-  learning_rate: 0.003 
-  weight_decay: 0.0
-  max_epochs: 20
-  patience: 3            # stop after 3 epochs without a better validation AUC
-  min_delta: 0.0005      # an improvement smaller than this doesn't count
-  threshold: 0.5         # for validation accuracy
-
+run_name: logreg_history_rates
+label: late
+features: [route_id, direction_id, stop_id, point_type, standard_type, hour, day_of_week, day_type]
+numeric_features: [scheduled_headway, time_point_order]
 history:
   windows: [7, 14, 28, 56]
   smoothing: 20.0
+  counts: false
+train:
   burn_in_days: 14
-
-output: models/latenet.pt
+model:
+  type: logreg
+  params: {solver: lbfgs, C: 1.0, max_iter: 300}
