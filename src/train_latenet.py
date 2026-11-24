@@ -19,6 +19,7 @@ import torch
 import yaml
 from sklearn.metrics import accuracy_score, roc_auc_score
 
+from src.extra import extra_md5s
 from src.latenet_data import build_scaling, build_vocab, load_train_val, make_loader
 from src.latenet_model import build_model, count_parameters
 from src.train import ARTIFACT_ROOT, TRACKING_URI, dvc_md5, export_runs, flatten, git_commit
@@ -85,6 +86,7 @@ def main(argv=None):
             "dvc_md5_train": dvc_md5("train"),
             "dvc_md5_val": dvc_md5("val"),
             "dvc_md5_test": dvc_md5("test"),
+            **extra_md5s(cfg, dvc_md5),
             "rows_train": len(train),
             "rows_val": len(val),
             "n_parameters": count_parameters(model),

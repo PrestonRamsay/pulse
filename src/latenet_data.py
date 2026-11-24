@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 from src.db import ROOT
+from src.extra import extra_spec, keep_train_rows, load_extra
 from src.features import add_day_type, add_history_features, history_feature_names
 
 import torch
@@ -24,17 +25,25 @@ def load_split(name):
 def load_train_val(cfg):
     """Train and val inputs. With a `history` block in the config, also adds the recent
     late rates from src/features.py; each row uses only earlier service days.
-    Returns (train, val, history_cols)."""
+    With `extra_data` (src/extra.py), earlier months either fill the history windows only or
+    are also trained on. Returns (train, val, history_cols)."""
     h = cfg.get("history")
     if not h:
-        return load_split("train"), load_split("val"), []
+        extra = load_extra(cfg, columns=CATEGORICAL + FLAGS + NUMERIC + [LABEL])
+        train = load_split("train")
+        if extra is not None and extra_spec(cfg)["use"] == "train":
+            train = pd.concat([extra, train], ignore_index=True)
+        return train, load_split("val"), []
     train = pd.read_parquet(SPLIT_DIR / "train.parquet")
     val = pd.read_parquet(SPLIT_DIR / "val.parquet")
-    both = add_day_type(pd.concat([train, val], ignore_index=True))
+    train_start = train["service_date"].min()
+    extra = load_extra(cfg)
+    both = add_day_type(pd.concat([train, val] if extra is None else [extra, train, val], ignore_index=True))
     both = add_history_features(both, both, windows=tuple(h["windows"]), smoothing=h["smoothing"])
     history_cols = history_feature_names(tuple(h["windows"]), counts=False)
     is_val = both["service_date"] >= val["service_date"].min()
     train, val = both[~is_val], both[is_val]
+    train = keep_train_rows(train, cfg, train_start)
     start = train["service_date"].min() + pd.Timedelta(days=h["burn_in_days"])
     train = train[train["service_date"] >= start]
     keep = CATEGORICAL + FLAGS + NUMERIC + history_cols + [LABEL]
@@ -50,7 +59,8 @@ def load_eval_split(cfg, name):
         return pd.read_parquet(SPLIT_DIR / f"{name}.parquet", columns=cols)
     order = ["train", "val", "test"]
     frames = [pd.read_parquet(SPLIT_DIR / f"{n}.parquet") for n in order[: order.index(name) + 1]]
-    both = add_day_type(pd.concat(frames, ignore_index=True))
+    extra = load_extra(cfg)  # same windows as in training (src/extra.py)
+    both = add_day_type(pd.concat(frames if extra is None else [extra, *frames], ignore_index=True))
     both = add_history_features(both, both, windows=tuple(h["windows"]), smoothing=h["smoothing"])
     history_cols = history_feature_names(tuple(h["windows"]), counts=False)
     target = both[both["service_date"] >= frames[-1]["service_date"].min()]

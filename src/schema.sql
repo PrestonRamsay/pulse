@@ -1,13 +1,18 @@
--- stop_events: one row per scheduled bus stop event, from either source.
+-- stop_events: one row per scheduled bus stop event, from any of three sources.
 --   source = 'historical'  MBTA Bus Arrival/Departure CSVs (timepoints only, has actual times)
+--   source = 'lamp'        MBTA LAMP bus events, daily (timepoints, has actual times; src/pull_lamp.py)
 --   source = 'api'         MBTA V3 /schedules daily pull (timepoints kept, no actual times yet)
 --
--- Both sources are stored in the files' conventions: file-style route ids ('01', 'SL1'),
+-- For the same key, historical beats lamp beats api: a monthly file replaces LAMP or API rows
+-- for its days, and LAMP fills in actual times on API rows. Training splits use historical only.
+--
+-- All sources are stored in the files' conventions: file-style route ids ('01', 'SL1'),
 -- direction as the word, and wall-clock Boston timestamps with no UTC offset.
 
 CREATE TABLE IF NOT EXISTS stop_events (
     id                BIGSERIAL    PRIMARY KEY,
-    source            TEXT         NOT NULL CHECK (source IN ('historical', 'api')),
+    source            TEXT         NOT NULL CONSTRAINT stop_events_source_check
+                                   CHECK (source IN ('historical', 'lamp', 'api')),
 
     -- Shared by both sources. These five columns are the natural key.
     service_date      DATE         NOT NULL,
@@ -42,3 +47,21 @@ CREATE TABLE IF NOT EXISTS stop_events (
 );
 
 CREATE INDEX IF NOT EXISTS stop_events_source_date ON stop_events (source, service_date);
+
+-- Migration for tables created before 'lamp' existed (a no-op afterwards): drop every older
+-- check on source, whatever Postgres named it, then make sure the current one exists.
+DO $$
+DECLARE c record;
+BEGIN
+    FOR c IN SELECT conname FROM pg_constraint
+             WHERE conrelid = 'stop_events'::regclass AND contype = 'c'
+               AND pg_get_constraintdef(oid) LIKE '%source%'
+               AND pg_get_constraintdef(oid) NOT LIKE '%lamp%' LOOP
+        EXECUTE format('ALTER TABLE stop_events DROP CONSTRAINT %I', c.conname);
+    END LOOP;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conrelid = 'stop_events'::regclass AND conname = 'stop_events_source_check') THEN
+        ALTER TABLE stop_events ADD CONSTRAINT stop_events_source_check
+            CHECK (source IN ('historical', 'lamp', 'api'));
+    END IF;
+END $$;

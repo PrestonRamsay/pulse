@@ -1,0 +1,19 @@
+# Experiment B: logreg_history_rates trained on April-August 2026 (train from 15 Apr after the
+# 14-day burn-in), so it sees school-term weeks (April to mid-June). Validation unchanged.
+experiment: pulse-late-3min
+run_name: logreg_history_rates_apr_aug
+label: late
+features: [route_id, direction_id, stop_id, point_type, standard_type, hour, day_of_week, day_type]
+numeric_features: [scheduled_headway, time_point_order]
+history:
+  windows: [7, 14, 28, 56]
+  smoothing: 20.0
+  counts: false
+train:
+  burn_in_days: 14
+model:
+  type: logreg
+  params: {solver: lbfgs, C: 1.0, max_iter: 300}
+extra_data:
+  files: [apr_jun]
+  use: train

@@ -72,6 +72,61 @@ is appended to `logs/pull_daily.log`.
 Both runs are in line with a weekday in the files (about 91,400 on 8–10 September). The 199 and
 218 kept-but-not-inserted rows share a key with another trip at the same stop and minute.
 
+The API only gives schedules. `/schedules` accepts past dates but returns planned times;
+`/predictions` rejects a date filter ("Unsupported filter(s): date"); and `/vehicles` is live
+positions only. So the API can't say how late yesterday's buses were.
+
+### Third source: LAMP daily actual times
+
+MBTA's LAMP project publishes bus events with **TransitMaster actual times**, the same system
+behind the monthly files, at
+`https://performancedata.mbta.com/lamp/tableau/bus/`. There are two files:
+- `LAMP_RECENT_Bus_Events.parquet`: about 175 MB, the last 7 service days including yesterday,
+  refreshed every morning.
+- `LAMP_ALL_Bus_Events.parquet`: about 8.8 GB, from 31 December 2025, read remotely by row
+  group, about 50 MB per month.
+
+Actual times exist only at timepoints, the same stops this project models.
+
+**Agreement with the monthly files** (`python -m src.lamp_check`, 1–15 September, the
+validation weeks; no model involved):
+
+| Check | Result |
+|---|---:|
+| Monthly-file departures matched in LAMP | 1,125,842 of 1,155,247 (97.5%) |
+| Actual time identical to the second | 99.80% (99.83% within 60 s) |
+| Late label agrees | **99.92%** (start 99.89%, mid 99.95%, end 99.76%) |
+| Late rate on matched rows | monthly 49.12%, LAMP 49.16% |
+
+The unmatched 2.5% are mostly Silver Line trips and routes 712/713. Getting there needed four
+conventions, found by matching the two sources (`src/lamp.py`):
+
+- **Times:** use LAMP's seconds-after-midnight columns on the service date. Its planned-time
+  timestamp column is shifted early by the UTC offset (4 hours in September, 5 in November),
+  so it can't be used. A first attempt that ignored this matched only 6.5% of rows, and those
+  agreed on the label only 58% of the time.
+- **Route ids:** single digits are zero-padded in the files (`1` becomes `01`). The Silver
+  Line, CT3 and 194 use GTFS ids in LAMP: SL1 = 741, SL2 = 742, SL3 = 743, SL4 = 751, SL5 = 749,
+  SLW = 746, CT3 = 708, 194 = 8993. Each pair matched 99.9–100% of that route's departures.
+  School variants 191–193 and `746_` appear under their main route.
+- **Direction:** 0 = Outbound, 1 = Inbound, as in the API.
+- **Endpoints:** the monthly files record the *arrival* at a route's last stop. LAMP's arrival
+  matches it to the second 99.3% of the time there; its departure matches only 68.9%.
+
+**The daily pull.** `python -m src.pull_lamp` downloads the recent file each morning and loads
+every finished service day into `stop_events` with `source = 'lamp'`. Today is skipped while
+it's still running. The first run (24 November) loaded 466,054 rows for 18–23 November, about
+86,000 per weekday, with 41–53% late. Reruns update the same rows and insert nothing.
+`--start/--end` backfills from the big file.
+
+Sources don't overwrite each other blindly. For the same key, **monthly file > LAMP > API**:
+- LAMP never touches a monthly-file row. A trial upsert of 1 September, rolled back, left all
+  90,667 monthly rows and their actual times unchanged.
+- A monthly file replaces LAMP rows for its days when it arrives.
+- LAMP fills in actual times on schedule-only API rows.
+
+Training splits read `source = 'historical'` only, so the frozen splits never change.
+
 ### Splits
 
 Labelled historical rows only (`source = 'historical' AND late IS NOT NULL`), cut on
@@ -126,10 +181,27 @@ Both trained on train, scored on validation, logged to MLflow experiment `pulse-
 All runs are in MLflow experiment `pulse-late-3min`, trained on train (1 July – 31 August;
 runs with history features drop the first 14 days, whose windows are nearly empty) and scored
 on validation (1–15 September). The test split was not read until §4. Configs are in
-`configs/<run name>.yaml`; the winner's is also saved as `configs/final.yaml` (identical
-settings to `configs/logreg_history_rates.yaml`). The run table, best validation AUC first,
-is exported to `mlflow_runs.csv`. There are 20 runs in all: the 10 below and the 10
-neural-network runs further down.
+`configs/<run name>.yaml`; the current leader's is also saved as `configs/final.yaml`
+(identical settings to `configs/logreg_history_rates.yaml`). The run table, best validation
+AUC first, is exported to `mlflow_runs.csv`. There are 20 runs in all: the 10 below and the
+10 neural-network runs further down.
+
+> **Status (2026-11-24): the final model choice is open.** The logistic regression
+> `logreg_history_rates` leads on validation and is the version currently in Production,
+> but the choice is made last, on validation, after four checks:
+> 1. **Serving:** the daily API pull has no actual times, so yesterday's outcomes aren't known
+>    from it. Are the history features and recalibration available at serving time, and at
+>    what lag? *Answered (§1, third source):* MBTA's LAMP publishes yesterday's actual times
+>    every morning. It agrees with the monthly files on 99.92% of late labels, and
+>    `src/pull_lamp.py` loads it daily, so "up to yesterday" is available as designed.
+> 2. **Window meaning:** labelled data starts on 1 July, so a "56-day" rate in July covers
+>    only a few weeks of summer. In September it covers 56 days that include school weeks.
+> 3. **Seed noise:** each net config ran with one seed. Is the 0.010 gap with history, or the
+>    0.025 gap without it, bigger than seed-to-seed variation?
+> 4. **More months:** loading January–June 2026 would add school-term weeks to training and
+>    fill the July history windows.
+>
+> These use train and validation only. Test is not touched again (§4).
 
 ### Runs
 
@@ -219,14 +291,16 @@ The sweep changed one setting at a time from `latenet_base`:
   more closely the net fits summer, the worse it extrapolates. It also under-predicts more
   than the logistic regression: its mean prediction is 0.395 against 0.487 actual. The logistic
   regression is linear in the same inputs, so it extrapolates smoothly.
-- **Why it was not chosen:** it scored 0.010 AUC below `logreg_history_rates` on validation.
+- **Why it trails for now:** it scored 0.010 AUC below `logreg_history_rates` on validation.
   It is less stable (best at epoch 1), 70 times larger (93,649 parameters against 1,357) and
-  less well calibrated. The test split was not used for this choice. For comparison, `latenet_final`
-  was scored on test once, afterwards (§4).
+  less well calibrated. Without history inputs the order flips: the net leads by 0.025.
+  So if check 1 above removes the history features, the comparison changes. `latenet_final`
+  was scored on test once, after the logistic regression's test result was known (§4).
 
-### Final architecture
+### Current leading architecture
 
-`logreg_history_rates`, registered as `pulse-latenet`:
+`logreg_history_rates`, registered as `pulse-latenet` v1 (final choice pending, see the
+status note above):
 
 - **Inputs:** one-hot route, direction, stop, point type, standard type, hour, day of week
   and day type (1,338 columns, `handle_unknown="ignore"`), plus 18 standardized numeric
@@ -237,7 +311,7 @@ The sweep changed one setting at a time from `latenet_base`:
   the previous week's predictions and outcomes), then a 0.40 warning threshold (§5).
 
 It ties the trees on AUC, is better calibrated before and after recalibration, and each
-weight can be read directly. That's why it was chosen over `gbt_history`. It beats the neural
+weight can be read directly. That's why it leads `gbt_history`. It beats the neural
 network by 0.010 AUC on validation at a seventieth of the size.
 
 ### High-cardinality features (route, stop)
@@ -261,6 +335,22 @@ test split (16–30 September, 1,185,790 rows, 48.30% late). Model and threshold
 on validation beforehand. Features for test rows use only earlier service days. The rolling
 recalibration for a test day uses the previous 7 days' outcomes, which from 23 September on
 are earlier test days. That's what production would see, and a row's own label is never used.
+
+**When test was used, and what that means.** Test has been scored twice, once per model:
+
+| Date | Model | Why |
+|---|---|---|
+| 2026-11-18 | `logreg_history_rates` (logistic regression) | the single final evaluation of the Task 3 choice |
+| 2026-11-23 | `latenet_final` (neural network) | the latenet brief's final evaluation, run **after** the first test result was known |
+
+Neither model was trained on test, and neither threshold was moved after seeing it. But
+once a test result is known, it can influence later decisions, even unintentionally. That
+applies especially to the second evaluation, and to any choice between the two models. So
+the test numbers below are **no longer a fully clean estimate** of performance on unseen
+weeks. They stay as recorded. Further work uses train and validation only, the final model
+will be chosen on validation, and test won't be scored again without checking with the
+reviewer first. A genuinely fresh check would use newer data, such as October 2026, once its
+monthly file is loaded.
 
 ### Metrics
 
@@ -339,11 +429,11 @@ predicted and actual route late rates is **0.916** (0.903 over the 78 routes wit
 from the saved test predictions (`data/preds/logreg_history_rates_test.parquet`); the model was
 not re-scored.
 
-### The neural network on test (scored once, not used for the choice)
+### The neural network on test (scored once, after the logistic regression's test run)
 
 `latenet_final` (MLflow run `1ac5d213…`) was scored once on test with
 `python -m src.evaluate_latenet test --threshold 0.35 --run-id <run id>`, after the logistic
-regression had been chosen. The 0.35 threshold was fixed on validation beforehand. The net has
+regression's test result was known. The 0.35 threshold was fixed on validation beforehand. The net has
 no recalibration step. Its metrics are logged on its run.
 
 | | Validation | Test |
@@ -363,8 +453,8 @@ route correlation stayed at 0.92. But its **probability level collapsed**. By la
 the history inputs are even further outside the summer range, and instead of following them
 up, the net's output fell. It under-predicts in every hour of the day by 10–27 points, worst
 at 8am (28% predicted against 55% actual). So a fixed threshold flags fewer buses and catches
-fewer late ones. It would miss the 65% accuracy bar at 0.5, while the chosen model clears it
-(67.3%). Rolling recalibration would most likely fix the level, since the ranking is intact,
+fewer late ones. It would miss the 65% accuracy bar at 0.5, while the logistic regression
+clears it (67.3%). Rolling recalibration would most likely fix the level, since the ranking is intact,
 but it was not tried on test, so as not to tune on test.
 
 ### Serving latency
@@ -459,12 +549,12 @@ trips, the threshold has to rise, and more late trips will be shown as on time.
 
 | Item | Value |
 |---|---|
-| Git commit | Code, configs and this report: the commit that adds `configs/final.yaml` with the logistic regression (`git log -1 -- configs/final.yaml`). The winning run logged `32b0200-dirty` (it was trained before the Task 3 code was committed). Retraining with the committed code reproduces it exactly (below). |
+| Git commit | Code, configs and this report: the commit that adds `configs/final.yaml` with the logistic regression (`git log -1 -- configs/final.yaml`). The leading run logged `32b0200-dirty` (it was trained before the Task 3 code was committed). Retraining with the committed code reproduces it exactly (below). |
 | DVC splits (md5) | train `9c76528a5a338970f93ee5e6e3928ce2`, val `e381cfc557b368f1f9360888e12f3d02`, test `b58c1d86758c22e0863529294b79a3cc` |
 | DVC model | `models/pulse-latenet` (the MLflow model of version 1), md5 `22190144455cc3bf4750c8794b8687b8.dir`. The neural network's weights are also tracked: `models/latenet.pt`, md5 `fcde379666e7ae31a779328122b4c4ea`. |
 | MLflow tracking | `sqlite:///mlflow.db`, artifacts in `mlruns/` |
 | MLflow experiment | `pulse-late-3min` (20 runs) |
-| Winning run | `logreg_history_rates`, run id `10194bd134054df4bef5ef658e3dfff3`, config `configs/final.yaml` |
+| Current leading run (final choice pending) | `logreg_history_rates`, run id `10194bd134054df4bef5ef658e3dfff3`, config `configs/final.yaml` |
 | Registered model | `pulse-latenet` **version 1**, moved through **Staging** to **Production**, alias `production`. Its description names the source run. |
 | Model version tags | threshold 0.4, recalibration rolling 7-day, test AUC 0.7375 |
 
@@ -472,7 +562,7 @@ Reproduce from a fresh clone (README.md has the setup):
 
 ```bash
 dvc pull                                   # frozen splits and the model
-python -m src.train configs/final.yaml     # the winning run: validation AUC 0.7255
+python -m src.train configs/final.yaml     # the leading run: validation AUC 0.7255
 python -m src.calibrate logreg_history_rates
 python -m src.evaluate logreg_history_rates --threshold 0.40   # test, once per run
 python -m src.latency_check                # single-prediction latency
@@ -514,9 +604,12 @@ and threshold are applied outside it.
 - **Predict day-specific disruption.** Weather, incidents, detours and events aren't in the
   features. That's most of the variation left above AUC 0.74.
 - **Cover every stop.** Only timepoints have labels.
-- **Serve as-is.** Production needs yesterday's actual departures to update the late rates
-  and the recalibration. Today the pipeline gets actuals only from the monthly files; the
-  daily API pull stores schedules only.
+- **Serve end to end yet.** Yesterday's actual departures now arrive daily from LAMP
+  (`src/pull_lamp.py`, §1), but the morning job that turns them into late rates and the
+  recalibration shift, then scores the day's schedule, isn't built. `pull_lamp` also has to be
+  scheduled; so far it has been run by hand. It also depends on LAMP's undocumented
+  conventions staying stable (§1), so `src/lamp_check.py` should be rerun whenever a monthly
+  file arrives.
 - **Count cancellations.** They are dropped with missing records, not counted as late.
 - **Know the seasons.** There are only three months of history: one summer and two weeks of
   term, no winter.
@@ -528,8 +621,9 @@ and threshold are applied outside it.
    above.
 2. **School calendar** once training spans a term, and planned service changes from
    `/alerts`.
-3. **A daily actuals feed** (archived vehicle positions, used only for *earlier* trips) so the
-   features and recalibration are truly "up to yesterday" in production.
+3. **The daily scoring job** on top of the LAMP feed (now built and checked): each morning, load
+   yesterday's LAMP actuals, update the late rates and the recalibration shift, and score
+   today's schedule from the API pull.
 4. **More history** (12+ months) and retraining on a rolling window, so the model has seen
    seasonal shifts instead of only reacting to them.
 5. **Make the neural network serveable.** It ranks as well as the logistic regression (test

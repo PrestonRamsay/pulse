@@ -19,6 +19,9 @@ import pandas as pd
 # Service days that ran a different pattern than their weekday. Found from the daily row
 # counts in the files (weekday ~85k rows, Saturday ~64k, Sunday ~54k) and matching holidays.
 HOLIDAY_SERVICE = {
+    "2026-04-20": "saturday",  # Patriots' Day (Mon): 71k rows (weekday median 90k, Saturday 68k)
+    "2026-05-25": "sunday",    # Memorial Day (Mon): 57k rows (Sunday median 57k)
+    # Juneteenth (Fri 19 June) ran a normal weekday schedule.
     "2026-07-03": "saturday",  # Independence Day observed (Fri): 67k rows
     "2026-07-04": "sunday",    # Independence Day (Sat): 54k rows
     "2026-09-07": "sunday",    # Labor Day (Mon): 56k rows

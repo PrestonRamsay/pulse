@@ -1,0 +1,5 @@
+outs:
+- md5: 05c9b891ecbbf0cc6305a4b67b080052
+  size: 41894062
+  hash: md5
+  path: apr_jun.parquet

@@ -29,6 +29,7 @@ from sklearn.metrics import (accuracy_score, average_precision_score, brier_scor
 
 from src.db import ROOT
 from src.models import TRUSTED_TYPES, build_model
+from src.extra import extra_md5s, keep_train_rows, load_extra
 from src.features import add_day_type, add_history_features, history_feature_names
 
 SPLIT_DIR = ROOT / "data" / "splits"
@@ -43,7 +44,9 @@ def load_frames(cfg):
     """Train and validation with day_type and (optionally) history features. Test is not read."""
     train = pd.read_parquet(SPLIT_DIR / "train.parquet")
     val = pd.read_parquet(SPLIT_DIR / "val.parquet")
-    both = add_day_type(pd.concat([train, val], ignore_index=True))
+    train_start = train["service_date"].min()
+    extra = load_extra(cfg)  # optional earlier months (src/extra.py)
+    both = add_day_type(pd.concat([train, val] if extra is None else [extra, train, val], ignore_index=True))
     # One shared category set for train and val (concat of differing categories gives object).
     for c in CATEGORICAL:
         both[c] = both[c].astype(str).astype("category")
@@ -52,6 +55,7 @@ def load_frames(cfg):
         both = add_history_features(both, both, windows=tuple(hist["windows"]), smoothing=hist["smoothing"])
     is_val = both["service_date"] >= val["service_date"].min()
     train, val = both[~is_val], both[is_val]
+    train = keep_train_rows(train, cfg, train_start)
     burn_in = cfg.get("train", {}).get("burn_in_days", 0)
     if burn_in:
         train = train[train["service_date"] >= train["service_date"].min() + pd.Timedelta(days=burn_in)]
@@ -134,6 +138,8 @@ def main(argv=None):
             "dvc_md5_train": dvc_md5("train"),
             "dvc_md5_val": dvc_md5("val"),
             "dvc_md5_test": dvc_md5("test"),
+            **extra_md5s(cfg, dvc_md5),
+            "train_first_day": str(train["service_date"].min().date()),
             "rows_train": len(y_train),
             "rows_val": len(y_val),
             "n_numeric_features": len(numeric),

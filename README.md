@@ -6,7 +6,8 @@ Spec: [ml_spec.md](ml_spec.md). Results: [REPORT.md](REPORT.md).
 ## Layout
 
 ```
-src/        ingestion (load_historical, pull_daily), preparation (make_splits), features,
+src/        ingestion (load_historical, pull_daily, pull_lamp + lamp, lamp_check),
+            preparation (make_splits, make_extra, extra), features,
             training (train_baseline for Task 2, train + models), calibrate, evaluate,
             the neural network (latenet_data, latenet_model, train_latenet, evaluate_latenet),
             latency_check
@@ -38,7 +39,7 @@ MBTA_API_KEY=your_key
 `DATABASE_URL=postgresql://pulse:pulse@localhost:5432/pulse`. The scripts create the
 `stop_events` table from `src/schema.sql` if it doesn't exist.
 
-## From a fresh clone to the winning run
+## From a fresh clone to the leading run
 
 After the setup above (the venv and `pip install -r requirements.txt`; no database or `.env`
 is needed for this path):
@@ -50,7 +51,7 @@ python -m src.train configs/final.yaml
 
 - `dvc pull` fetches the frozen train/val/test splits and the registered model
   (`models/pulse-latenet`).
-- The second command retrains the winning run (`logreg_history_rates`, logistic regression on
+- The second command retrains the current leading run (`logreg_history_rates`, logistic regression on
   schedule fields + recent late rates) and logs it to a new local MLflow store. It prints
   validation **AUC 0.7255, accuracy 0.6622**, the same as the logged run, because the fit is
   deterministic. It takes about 2 minutes.
@@ -89,6 +90,17 @@ Results and the reasoning behind every choice: [REPORT.md](REPORT.md).
    python -m src.pull_daily
    ```
 
+   Then load yesterday's **actual** times from MBTA LAMP (run daily too). The API has no
+   actual times; LAMP does, and it agrees with the monthly files on 99.92% of late labels.
+   It keeps monthly-file rows untouched, and a monthly file replaces LAMP rows when it
+   arrives. Counts are appended to `logs/pull_lamp.jsonl`.
+
+   ```bash
+   python -m src.pull_lamp                                       # last 7 finished days
+   python -m src.pull_lamp --start 2026-10-01 --end 2026-11-17   # optional backfill
+   python -m src.lamp_check                                      # LAMP vs monthly files, 1-15 Sep
+   ```
+
 4. Build the time-based splits, or fetch the frozen ones with `dvc pull` if you have the remote:
 
    ```bash
@@ -112,7 +124,7 @@ Results and the reasoning behind every choice: [REPORT.md](REPORT.md).
    ```bash
    python -m src.train configs/history_slot_8wk.yaml        # spec baseline, no training
    python -m src.train configs/gbt_history.yaml             # gradient-boosted trees
-   python -m src.train configs/final.yaml                   # the chosen model (= logreg_history_rates)
+   python -m src.train configs/final.yaml                   # the current leader (= logreg_history_rates)
    python -m src.calibrate logreg_history_rates             # rolling recalibration + threshold table
    ```
 

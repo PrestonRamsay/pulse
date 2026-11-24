@@ -5,8 +5,8 @@
     python -m src.load_historical path/a.csv ...   # specific files
 
 Safe to rerun: the table is unique on (service_date, route_id, direction_id, stop_id,
-scheduled) and rows are inserted with ON CONFLICT DO NOTHING, so the first row for a
-key wins and reruns insert nothing.
+scheduled). Among historical rows the first row for a key wins and reruns insert nothing.
+A historical row replaces a LAMP or API row with the same key ("inserted" counts both).
 """
 
 import argparse
@@ -41,10 +41,17 @@ CREATE TEMP TABLE IF NOT EXISTS staging (
 """
 
 _cols = ", ".join(COLUMNS)
+# A monthly file is the source of record: it replaces LAMP or API rows with the same key
+# (src/pull_lamp.py, src/pull_daily.py), but never another historical row (first one wins).
 INSERT = f"""
 INSERT INTO stop_events ({_cols})
 SELECT {_cols} FROM staging
-ON CONFLICT ON CONSTRAINT stop_events_key DO NOTHING
+ON CONFLICT ON CONSTRAINT stop_events_key DO UPDATE SET
+    source = 'historical', actual = EXCLUDED.actual, half_trip_id = EXCLUDED.half_trip_id,
+    time_point_id = EXCLUDED.time_point_id, time_point_order = EXCLUDED.time_point_order,
+    point_type = EXCLUDED.point_type, standard_type = EXCLUDED.standard_type,
+    scheduled_headway = EXCLUDED.scheduled_headway, headway = EXCLUDED.headway, loaded_at = now()
+WHERE stop_events.source IN ('lamp', 'api')
 """
 
 

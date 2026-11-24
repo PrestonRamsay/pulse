@@ -112,3 +112,5 @@ scikit-learn==1.9.1
 mlflow==3.17.2
 dvc==3.67.1
 pyarrow==25.0.1
+fsspec==2026.9.0
+aiohttp==3.14.5

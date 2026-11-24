@@ -97,6 +97,9 @@ def main(argv=None):
     if "metrics.test_auc_roc" in runs and pd.notna(runs["metrics.test_auc_roc"].iloc[0]) and not args.force:
         raise SystemExit(f"{args.run_name} already has test metrics: the test split is evaluated once.")
     cfg = yaml.safe_load((ROOT / "configs" / f"{args.run_name}.yaml").read_text())
+    if cfg.get("extra_data"):
+        raise SystemExit("extra_data runs aren't supported here (test windows would differ from training); "
+                         "and test is not to be scored again without the reviewer's OK.")
     categorical, numeric = feature_lists(cfg)
 
     train, val, test = load_all(cfg)

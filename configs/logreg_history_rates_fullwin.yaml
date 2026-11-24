@@ -1,0 +1,19 @@
+# Experiment A: logreg_history_rates, with April-June 2026 filling the late-rate windows only.
+# Train rows are unchanged (15 Jul - 31 Aug); every July row now has a full 56 days of history.
+experiment: pulse-late-3min
+run_name: logreg_history_rates_fullwin
+label: late
+features: [route_id, direction_id, stop_id, point_type, standard_type, hour, day_of_week, day_type]
+numeric_features: [scheduled_headway, time_point_order]
+history:
+  windows: [7, 14, 28, 56]
+  smoothing: 20.0
+  counts: false
+train:
+  burn_in_days: 14
+model:
+  type: logreg
+  params: {solver: lbfgs, C: 1.0, max_iter: 300}
+extra_data:
+  files: [apr_jun]
+  use: history
