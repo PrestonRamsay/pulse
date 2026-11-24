@@ -1,5 +1,7 @@
 [core]
     autostage = false
-    remote = origin
+    remote = github
 ['remote "origin"']
     url = https://dagshub.com/PrestonRamsay/pulse.dvc
+['remote "github"']
+    url = https://raw.githubusercontent.com/PrestonRamsay/pulse-dvc-store/main

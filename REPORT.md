@@ -6,7 +6,17 @@
 
 **July, August and September 2026**, the three most recent consecutive months published in the
 2026 MBTA Bus Arrival/Departure zip (October was not yet available on 2026-10-29). They are loaded
-into the Postgres `stop_events` table by `python -m src.load_historical`.
+into the Postgres `stop_events` table by `python -m src.load_historical`, and they are the
+only months in the frozen train/validation/test splits.
+
+What else is in the table, and why "three months" and "four months" were both said:
+- **October 2026:** two days of `api` rows (29–30 October). These are schedules from the daily
+  API pull, with no actual times. So four months had rows, but only three had labels.
+- **April–June 2026:** loaded on 2026-11-24 from the same zip (7.43M rows), for the follow-up
+  experiments in §3. They are kept out of the splits and used through `data/splits/apr_jun.parquet`.
+- **18–23 November 2026:** `lamp` rows, actual times from MBTA LAMP (third source, below).
+
+January–March 2026 are also in the zip but not loaded.
 
 ### Row counts before and after cleaning
 
@@ -196,12 +206,38 @@ AUC first, is exported to `mlflow_runs.csv`. There are 20 runs in all: the 10 be
 >    `src/pull_lamp.py` loads it daily, so "up to yesterday" is available as designed.
 > 2. **Window meaning:** labelled data starts on 1 July, so a "56-day" rate in July covers
 >    only a few weeks of summer. In September it covers 56 days that include school weeks.
+>    *Answered (experiment A, below):* filling the windows with April–June changed validation
+>    AUC by +0.0002 (logistic regression) and −0.006 (net). It was a real flaw, but not the cause.
 > 3. **Seed noise:** each net config ran with one seed. Is the 0.010 gap with history, or the
->    0.025 gap without it, bigger than seed-to-seed variation?
-> 4. **More months:** loading January–June 2026 would add school-term weeks to training and
->    fill the July history windows.
+>    0.025 gap without it, bigger than seed-to-seed variation? *Answered (2026-11-24, clean
+>    commit `0f4eec4`):* the April–August net with seeds 0–3 reached best validation AUC
+>    0.7347, 0.7363, 0.7356 and 0.7353 (mean 0.7355, standard deviation 0.0007). Its lead
+>    over the logistic regression (0.0031) is more than twice the seed spread (0.0013), so the
+>    ranking advantage is real. But seeds 1–3 peaked at **epoch 1**, with AUC falling 0.0004–0.0022
+>    by the last epoch. Under the rule below, decided before these results, the net fails
+>    the stability condition. **The logistic regression (April–August) is the final model.**
+> 4. **More months:** which months help September? *Answered (experiment B, below):*
+>    school-term months. Training on April–August lifts the logistic regression by 0.007 and
+>    the net by 0.018, and fixes the net's epoch-1 peak. January–March, more term weeks plus
+>    winter, is the next candidate.
 >
-> These use train and validation only. Test is not touched again (§4).
+> **Decisions fixed on 2026-11-24, before the seed results:**
+> - **Training window:** 15 April – 31 August (experiment B). It beat July–August on validation
+>   for both model families, so this doesn't depend on which model wins.
+> - **Selection rule:** the net (April–August, seeds 0–3) is the final model only if **both**
+>   hold:
+>   1. its mean validation AUC beats the logistic regression's 0.7324 by more than **twice
+>      the standard deviation** across the four seeds;
+>   2. it trains stably in **every** seed: best epoch later than epoch 1, and last-epoch
+>      validation AUC within 0.005 of its best (no repeat of the old net's decline after
+>      epoch 1).
+>
+>   Otherwise the logistic regression (April–August) is the final model, on simplicity and
+>   calibration. The logistic regression is deterministic, so it needs no seeds.
+> - **Then, on validation and before any test scoring:** re-pick the threshold for the final
+>   model, and apply the same rolling 7-day recalibration whichever model wins.
+>
+> These use train and validation only. Test is not touched again without the reviewer's OK (§4).
 
 ### Runs
 
@@ -296,6 +332,54 @@ The sweep changed one setting at a time from `latenet_base`:
   less well calibrated. Without history inputs the order flips: the net leads by 0.025.
   So if check 1 above removes the history features, the comparison changes. `latenet_final`
   was scored on test once, after the logistic regression's test result was known (§4).
+
+### Follow-up experiments after review (validation only)
+
+Two experiments test why both model families learned summer and struggled with September.
+Both use April–June 2026, loaded on 2026-11-24 and frozen as `data/splits/apr_jun.parquet`
+(7,054,235 rows, 45.8% late, DVC md5 `05c9b891…`, built by `src/make_extra.py`). Validation
+(1–15 September) and test are unchanged, and test was not read.
+
+- **A, full windows (`extra_data.use: history`):** April–June only feeds the late-rate
+  windows. The training rows are the same as before (15 July – 31 August), but every July
+  row now has a genuine 56 days of history instead of a few weeks (the window-meaning
+  question, status point 2).
+- **B, longer training (`extra_data.use: train`):** train on 15 April – 31 August (14-day
+  burn-in), so the models see school-term weeks. May ran 48.0% late, almost the same as
+  September's 48.5%. July and August ran about 42.5%.
+
+| Run | Train days | Train rows | Val AUC | Change | Val accuracy (0.5) | Notes |
+|---|---|---:|---:|---:|---:|---|
+| `logreg_history_rates` (current leader) | 15 Jul – 31 Aug | 3.72M | 0.7255 | n/a | 66.2% | mean prediction 0.449, Brier 0.214 |
+| A: `logreg_history_rates_fullwin` | 15 Jul – 31 Aug | 3.72M | 0.7257 | +0.000 | 66.2% | mean prediction 0.444 |
+| **B: `logreg_history_rates_apr_aug`** | 15 Apr – 31 Aug | 10.74M | **0.7324** | **+0.007** | 66.9% | mean prediction 0.468, Brier 0.210, PR-AUC 0.713 |
+| `latenet_final` | 15 Jul – 31 Aug | 3.72M | 0.7163 | n/a | 64.4% | best epoch 1, then worse every epoch |
+| A: `latenet_history_fullwin` | 15 Jul – 31 Aug | 3.72M | 0.7105 | −0.006 | 62.6% | best epoch 1 |
+| **B: `latenet_history_apr_aug`** | 15 Apr – 31 Aug | 10.74M | **0.7347** | **+0.018** | 67.1% | best epoch 5; val loss 0.648 → 0.607 |
+
+The validation late rate is 48.7%. Net accuracies are at the best epoch.
+
+- **A changed nothing that matters.** Truncated windows were a real flaw in what "56-day rate"
+  meant during training. But filling them moved the logistic regression by 0.0002 and the net
+  by −0.006, which is within the sweep's seed-level spread. The rates are shrunk toward their
+  parent level, so short windows already behaved sensibly.
+- **B is the fix.** Seeing school-term weeks lifts both models, and the net gains 2.5 times
+  as much. The net's training curve is also healthy now: validation AUC stays at 0.733–0.735
+  across all 8 epochs instead of peaking in epoch 1. Its probabilities are much closer to
+  reality (validation loss 0.648 to 0.607), and its accuracy at 0.5 rises from 64.4% to 67.1%.
+  This matches the diagnosis above: the net's problem was extrapolating from a summer-only
+  world, and the logistic regression's straight lines were less exposed to that.
+- **The ranking flips, narrowly:** net 0.7347, logistic regression 0.7324. The gap (0.002) is
+  smaller than the 0.005 spread of the original sweep, so it is being checked with seeds 1–3
+  of the B net (status point 3) before the final choice.
+- **Provenance:** these four runs logged `a43d170-dirty`, because the code was committed
+  afterwards in `5f57c95`. Run ids:
+  - `logreg_history_rates_fullwin` `2e992a27…`
+  - `logreg_history_rates_apr_aug` `145444ad…`
+  - `latenet_history_fullwin` `4ff34bc9…`
+  - `latenet_history_apr_aug` `3ddab843…`
+
+  The seed runs and the final winner are trained from a clean commit.
 
 ### Current leading architecture
 
@@ -552,6 +636,7 @@ trips, the threshold has to rise, and more late trips will be shown as on time.
 | Git commit | Code, configs and this report: the commit that adds `configs/final.yaml` with the logistic regression (`git log -1 -- configs/final.yaml`). The leading run logged `32b0200-dirty` (it was trained before the Task 3 code was committed). Retraining with the committed code reproduces it exactly (below). |
 | DVC splits (md5) | train `9c76528a5a338970f93ee5e6e3928ce2`, val `e381cfc557b368f1f9360888e12f3d02`, test `b58c1d86758c22e0863529294b79a3cc` |
 | DVC model | `models/pulse-latenet` (the MLflow model of version 1), md5 `22190144455cc3bf4750c8794b8687b8.dir`. The neural network's weights are also tracked: `models/latenet.pt`, md5 `fcde379666e7ae31a779328122b4c4ea`. |
+| DVC remotes | default `github`: the public store `PrestonRamsay/pulse-dvc-store`, read over HTTPS with no account. A plain `dvc pull` from an empty folder fetched all 12 files with matching md5s (2026-11-24). Backup `origin`: DagsHub, login needed. |
 | MLflow tracking | `sqlite:///mlflow.db`, artifacts in `mlruns/` |
 | MLflow experiment | `pulse-late-3min` (20 runs) |
 | Current leading run (final choice pending) | `logreg_history_rates`, run id `10194bd134054df4bef5ef658e3dfff3`, config `configs/final.yaml` |

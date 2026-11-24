@@ -49,8 +49,13 @@ dvc pull
 python -m src.train configs/final.yaml
 ```
 
-- `dvc pull` fetches the frozen train/val/test splits and the registered model
-  (`models/pulse-latenet`).
+- `dvc pull` fetches the frozen train/val/test splits, the April–June file and the models
+  (`models/pulse-latenet`, `models/latenet.pt`), about 82 MB. **No account or token is
+  needed:** the default remote is the public GitHub store
+  [`PrestonRamsay/pulse-dvc-store`](https://github.com/PrestonRamsay/pulse-dvc-store), read
+  over HTTPS. A DagsHub copy (`origin`) is kept as a backup and needs a DagsHub login.
+  Maintainers add new files with `python scripts/sync_dvc_store.py`, because DVC can't push
+  to the GitHub store.
 - The second command retrains the current leading run (`logreg_history_rates`, logistic regression on
   schedule fields + recent late rates) and logs it to a new local MLflow store. It prints
   validation **AUC 0.7255, accuracy 0.6622**, the same as the logged run, because the fit is
