@@ -571,6 +571,37 @@ aren't in the per-request time (building them for one row from the raw splits ta
 
 ## 5. Threshold Recommendation
 
+### Final model (April–August logistic regression): 0.40, fixed on validation on 2026-11-24
+
+The final model (`configs/final.yaml`, MLflow run `4235459a…`, clean commit `936714b`) was
+retrained on 15 April – 31 August. That reproduced experiment B exactly: validation AUC
+0.7324 and accuracy 66.9% at 0.5. Its threshold was re-picked from its own recalibrated
+validation probabilities with `python -m src.calibrate final`, **before any test scoring**,
+and the choice is tagged on the run (`chosen_threshold = 0.40`).
+
+| Threshold | Late buses caught | On-time buses flagged | All buses flagged | "Usually on time" but late | Accuracy |
+|---:|---:|---:|---:|---:|---:|
+| 0.35 | 83.6% | 54.4% | 68.6% | 25.4% | 64.1% |
+| **0.40** | **78.0%** | **46.2%** | **61.7%** | **28.0%** | **65.6%** |
+| 0.45 | 71.8% | 38.4% | 54.7% | 30.3% | 66.6% |
+| 0.50 | 65.0% | 31.3% | 47.7% | 32.6% | 66.9% |
+
+All of validation (1–15 September, 48.7% late), after rolling 7-day recalibration. In the
+school weeks (8–15 September), 0.40 catches 79.1% and flags 64.5% of buses.
+
+- **0.40 (recommended):** we catch 78% of late buses at the cost of flagging 46% of on-time
+  ones. It leans pessimistic, as the spec's expensive mistake asks, and warns on about 62% of
+  trips, in line with v1's operating point (59.5%).
+- **0.35:** catches 84%, but flags more than half of on-time buses and warns on 69% of trips,
+  while only 49% run late, so the warning starts to lose meaning.
+- **0.45 and 0.50:** fewer, sharper warnings (55% and 48% of trips), but 3 in 10 trips shown as
+  "Usually on time" run late, and a quarter to a third of late buses get no warning.
+
+Recalibration nudges validation AUC from 0.7324 to 0.7309, because each day gets its own
+shift. It brings the mean prediction from 0.468 to 0.484, against 0.487 actual.
+
+### Task 3 model (v1, July–August), for the record
+
 **Recommended threshold: 0.40** on the recalibrated probability, chosen on validation
 before the test run. At or above it, a trip shows a lateness warning; below it, "Usually on
 time".
