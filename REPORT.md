@@ -158,6 +158,43 @@ The late rate is not stable across the cut: July (42.7%) and August (42.4%) are 
 while 1–7 September runs 45.0% and 8–15 September, with schools back, 51.7%. Validation and test
 are both September, so the model is trained on summer and judged on the start of term.
 
+The final model also trains on April–June (`data/splits/apr_jun.parquet`, §3), which comes
+before train. So the order still holds: everything it learns from predates 1 September.
+
+### Why a time split, not a random one
+
+Pulse predicts **future** trips from what is known **before** they run. A random split would
+break that in three ways:
+- **It leaks the future.** Rows from the same day, slot and disruption would land on both
+  sides. A row from 20 September in training would teach the model about the very day it's
+  tested on.
+- **It hides drift.** The model would be judged on summer rows like the ones it trained on,
+  not on the September shift it actually faces. The jump from 42% to 49–52% late is the
+  hardest part of this problem, and a random split would make it invisible.
+- **It breaks the history features.** Late rates use only earlier service days. With a random
+  split, a training row's rate could include days after some test rows.
+
+So the cut is by service date: train before validation before test, with no overlap
+(asserted above). Test was held out until each model's single evaluation (§4).
+
+### When each feature becomes known
+
+All features are known before the trip runs. None comes from `actual`, `delay_min` or the
+observed `headway`; those columns are recorded during or after the trip and only ever feed the
+label (or are dropped).
+
+| Feature | Known when | Source |
+|---|---|---|
+| route, direction, stop, point type (start/mid/end), timepoint order, standard type, scheduled headway | when the schedule is published | the files (training); timetable joined to the files' timepoints (serving) |
+| hour, day of week | from the scheduled departure time | schedule |
+| day type (weekday / Saturday / Sunday pattern) | when the schedule is published (holidays mapped to the pattern they run) | schedule |
+| 16 late rates: network, route, stop and slot over 7, 14, 28 and 56 days | the morning of the trip's day, from **earlier service days only** | monthly files (training); MBTA LAMP, yesterday included, refreshed daily (serving, §1) |
+| rolling recalibration shift (not a feature, a serving step) | the morning of the day, from the previous 7 days | same as the late rates |
+
+**Never used:** `actual`, `delay_min`, observed `headway`, and anything from `/predictions`
+or `/vehicles`. `tests/test_features.py` checks that a row's own label, and its own day's
+labels, never reach its features.
+
 ## 2. Baselines
 
 Both trained on train, scored on validation, logged to MLflow experiment `pulse-late-3min`
@@ -191,14 +228,18 @@ Both trained on train, scored on validation, logged to MLflow experiment `pulse-
 All runs are in MLflow experiment `pulse-late-3min`, trained on train (1 July – 31 August;
 runs with history features drop the first 14 days, whose windows are nearly empty) and scored
 on validation (1–15 September). The test split was not read until §4. Configs are in
-`configs/<run name>.yaml`; the current leader's is also saved as `configs/final.yaml`
-(identical settings to `configs/logreg_history_rates.yaml`). The run table, best validation
-AUC first, is exported to `mlflow_runs.csv`. There are 20 runs in all: the 10 below and the
-10 neural-network runs further down.
+`configs/<run name>.yaml`; the final model's is `configs/final.yaml` (the April–August
+logistic regression, same settings as `configs/logreg_history_rates_apr_aug.yaml`). The run
+table, best validation AUC first, is exported to `mlflow_runs.csv`. There are 28 runs in all:
+- the 10 Task 3 runs below
+- the 10 neural-network runs
+- the 4 follow-up experiments and the 3 extra seeds
+- the final run
 
-> **Status (2026-11-24): the final model choice is open.** The logistic regression
-> `logreg_history_rates` leads on validation and is the version currently in Production,
-> but the choice is made last, on validation, after four checks:
+> **How the final model was chosen (2026-11-24).** After reviewer feedback, the choice was
+> made last, on validation, after four checks. The outcome is the **logistic regression
+> trained on April–August** (`configs/final.yaml`; architecture below). v1 (`logreg_history_rates`,
+> July–August) stays in Production until the final model's test run. The four checks:
 > 1. **Serving:** the daily API pull has no actual times, so yesterday's outcomes aren't known
 >    from it. Are the history features and recalibration available at serving time, and at
 >    what lag? *Answered (§1, third source):* MBTA's LAMP publishes yesterday's actual times
@@ -350,7 +391,7 @@ Both use April–June 2026, loaded on 2026-11-24 and frozen as `data/splits/apr_
 
 | Run | Train days | Train rows | Val AUC | Change | Val accuracy (0.5) | Notes |
 |---|---|---:|---:|---:|---:|---|
-| `logreg_history_rates` (current leader) | 15 Jul – 31 Aug | 3.72M | 0.7255 | n/a | 66.2% | mean prediction 0.449, Brier 0.214 |
+| `logreg_history_rates` (v1) | 15 Jul – 31 Aug | 3.72M | 0.7255 | n/a | 66.2% | mean prediction 0.449, Brier 0.214 |
 | A: `logreg_history_rates_fullwin` | 15 Jul – 31 Aug | 3.72M | 0.7257 | +0.000 | 66.2% | mean prediction 0.444 |
 | **B: `logreg_history_rates_apr_aug`** | 15 Apr – 31 Aug | 10.74M | **0.7324** | **+0.007** | 66.9% | mean prediction 0.468, Brier 0.210, PR-AUC 0.713 |
 | `latenet_final` | 15 Jul – 31 Aug | 3.72M | 0.7163 | n/a | 64.4% | best epoch 1, then worse every epoch |
@@ -381,22 +422,39 @@ The validation late rate is 48.7%. Net accuracies are at the best epoch.
 
   The seed runs and the final winner are trained from a clean commit.
 
-### Current leading architecture
+### Final architecture
 
-`logreg_history_rates`, registered as `pulse-latenet` v1 (final choice pending, see the
-status note above):
+`configs/final.yaml`, MLflow run `final` (`4235459a…`, clean commit `936714b`). It is the
+same architecture as `logreg_history_rates` (v1), trained on **15 April – 31 August**:
 
 - **Inputs:** one-hot route, direction, stop, point type, standard type, hour, day of week
-  and day type (1,338 columns, `handle_unknown="ignore"`), plus 18 standardized numeric
+  and day type (1,375 columns, `handle_unknown="ignore"`), plus 18 standardized numeric
   features: scheduled headway, timepoint order, and the 16 late rates on the log-odds scale.
-- **Model:** L2-regularized logistic regression (lbfgs, C = 1.0, max_iter 300).
-  **1,357 parameters** (1,356 weights + 1 intercept).
+- **Model:** L2-regularized logistic regression (lbfgs, C = 1.0). **1,394 parameters**
+  (1,393 weights + 1 intercept). It converged in 154 iterations; v1 hit the 300-iteration cap.
 - **Serving step:** rolling 7-day recalibration (one log-odds shift per day, computed from
   the previous week's predictions and outcomes), then a 0.40 warning threshold (§5).
+- **Validation:**
 
-It ties the trees on AUC, is better calibrated before and after recalibration, and each
-weight can be read directly. That's why it leads `gbt_history`. It beats the neural
-network by 0.010 AUC on validation at a seventieth of the size.
+  | | Raw | After recalibration |
+  |---|---:|---:|
+  | AUC | 0.7324 | 0.7309 |
+  | PR-AUC | 0.713 | |
+  | Accuracy at 0.5 | 66.9% | |
+  | Mean prediction (actual 48.7%) | 0.468 | 0.484 |
+  | Brier score | 0.210 | |
+
+**Why it over the network.** The April–August network ranks slightly but consistently better:
+validation AUC 0.7355 on average over four seeds, against 0.7324. But in three of four seeds it
+learns its best in the first pass and then declines, the instability that disqualified it
+under the rule fixed before the seeds ran (status note above). The logistic regression is
+deterministic, a sixtieth of the size (1,394 against 94,769 parameters), well calibrated, and
+each weight can be read directly. Over trees it was already chosen on calibration and
+simplicity, at the same AUC. The network is the next step once training spans more than one
+season.
+
+**v1** (`logreg_history_rates`, July–August, validation AUC 0.7255) is in Production until the
+final model passes its test run and is registered as v2 (§4, §6).
 
 ### High-cardinality features (route, stop)
 
@@ -413,6 +471,15 @@ There are 155 routes and 1,163 stop ids (2,483 route/direction/stop combinations
   changes, which a fixed one-hot weight cannot.
 
 ## 4. Final Evaluation (held-out test weeks)
+
+> **The final model (April–August logistic regression) has not been scored on test yet.** Its
+> threshold (0.40) and recalibration were fixed on validation first (§5), and its single test
+> run waits on the reviewer's OK, because test has already been seen twice (below). The
+> command is `python -m src.evaluate final --threshold 0.40 --register`. Its results will
+> replace this note. The numbers below are for **v1** (July–August) and the July–August
+> network.
+
+### v1 (`logreg_history_rates`, July–August)
 
 Run once by `python -m src.evaluate logreg_history_rates --threshold 0.40 --register` on the
 test split (16–30 September, 1,185,790 rows, 48.30% late). Model and threshold were fixed
@@ -664,44 +731,45 @@ trips, the threshold has to rise, and more late trips will be shown as on time.
 
 | Item | Value |
 |---|---|
-| Git commit | Code, configs and this report: the commit that adds `configs/final.yaml` with the logistic regression (`git log -1 -- configs/final.yaml`). The leading run logged `32b0200-dirty` (it was trained before the Task 3 code was committed). Retraining with the committed code reproduces it exactly (below). |
-| DVC splits (md5) | train `9c76528a5a338970f93ee5e6e3928ce2`, val `e381cfc557b368f1f9360888e12f3d02`, test `b58c1d86758c22e0863529294b79a3cc` |
-| DVC model | `models/pulse-latenet` (the MLflow model of version 1), md5 `22190144455cc3bf4750c8794b8687b8.dir`. The neural network's weights are also tracked: `models/latenet.pt`, md5 `fcde379666e7ae31a779328122b4c4ea`. |
+| Git commit | The final run logged **`936714b`** (clean: no uncommitted code or configs). That commit sets `configs/final.yaml` to the April–August logistic regression. |
+| DVC data (md5) | train `9c76528a5a338970f93ee5e6e3928ce2`, val `e381cfc557b368f1f9360888e12f3d02`, test `b58c1d86758c22e0863529294b79a3cc`, April–June `05c9b891ecbbf0cc6305a4b67b080052` (all logged on the run) |
+| DVC model | Now: `models/pulse-latenet` = the MLflow model of version 1 (July–August), md5 `22190144455cc3bf4750c8794b8687b8.dir`. After the final model's test run, it's replaced by version 2 and re-added. The neural network's weights are also tracked: `models/latenet.pt`, md5 `fcde379666e7ae31a779328122b4c4ea`. |
 | DVC remotes | default `github`: the public store `PrestonRamsay/pulse-dvc-store`, read over HTTPS with no account. A plain `dvc pull` from an empty folder fetched all 12 files with matching md5s (2026-11-24). Backup `origin`: DagsHub, login needed. |
 | MLflow tracking | `sqlite:///mlflow.db`, artifacts in `mlruns/` |
-| MLflow experiment | `pulse-late-3min` (20 runs) |
-| Current leading run (final choice pending) | `logreg_history_rates`, run id `10194bd134054df4bef5ef658e3dfff3`, config `configs/final.yaml` |
+| MLflow experiment | `pulse-late-3min` (28 runs, exported to `mlflow_runs.csv`) |
+| Final run | `final`, run id `4235459a862d4a578571cb7ecbc72156`, config `configs/final.yaml`. Validation AUC 0.7324, accuracy 66.9% at 0.5; threshold 0.40 tagged on the run before any test scoring. |
 | Registered model | `pulse-latenet` **version 1**, moved through **Staging** to **Production**, alias `production`. Its description names the source run. Screenshot of the registry page: [`assets/registry_pulse-latenet_production.jpg`](assets/registry_pulse-latenet_production.jpg) (2026-11-24). The final April–August model becomes version 2 after its test run, and the screenshot will be retaken then. |
 | Model version tags | threshold 0.4, recalibration rolling 7-day, test AUC 0.7375 |
 
 Reproduce from a fresh clone (README.md has the setup):
 
 ```bash
-dvc pull                                   # frozen splits and the model
-python -m src.train configs/final.yaml     # the leading run: validation AUC 0.7255
-python -m src.calibrate logreg_history_rates
-python -m src.evaluate logreg_history_rates --threshold 0.40   # test, once per run
-python -m src.latency_check                # single-prediction latency
+dvc pull                                     # splits, April-June and the models; no account needed
+python -m src.train configs/final.yaml       # the final run: validation AUC 0.7324, accuracy 0.6692
+python -m src.calibrate final                # recalibration + the threshold menu in §5
+python -m src.failure_cases final            # where it's wrong most often (§7), validation only
+python -m src.evaluate final --threshold 0.40   # test, once per run
+python -m src.latency_check                  # single-prediction latency
 ```
 
-1. `src.train` builds the history features, trains on train, scores validation, and logs the
-   run and model. `configs/final.yaml` keeps the run name `logreg_history_rates`, so the
-   later steps find the fresh run.
+1. `src.train` builds the history features (April–June included), trains on 15 April –
+   31 August, scores validation, and logs the run and model. The fit is deterministic:
+   retraining from `936714b` reproduced experiment B's run exactly (AUC 0.7324, accuracy 0.6692).
 2. `src.calibrate` applies the rolling recalibration to the validation predictions and logs
-   the calibration metrics and threshold table.
-3. `src.evaluate` is the only script that reads the test split. It refuses to run twice for
-   the same run (pass `--force` only to deliberately re-evaluate). With `--register`, it also
-   registers and promotes the model if it beats every baseline on test. A reproduction doesn't
-   need that flag.
+   the calibration metrics and threshold tables.
+3. `src.evaluate` is the only script that reads the test split. It builds test features
+   exactly as in training (April–June included). It refuses to run twice for the same run
+   (pass `--force` only to deliberately re-evaluate). With `--register`, it registers the
+   model in Staging and promotes it to Production if it beats every baseline on test. A
+   reproduction doesn't need that flag.
 
 The neural network reproduces with
 `python -m src.train_latenet configs/latenet_final.yaml`, which gives validation AUC 0.7163
 at epoch 1. That run was retrained once to check this, and matched to four decimals.
 
-**Checked on 2026-11-18:** retraining `configs/logreg_history_rates.yaml` with the current code,
-without logging, gave validation AUC 0.725536 and accuracy 0.662159, identical to the logged
-run. lbfgs stops at its 300-iteration cap (a convergence warning, as in Task 2). The fit is
-deterministic, so the result reproduces exactly; raising `max_iter` is a possible next tweak.
+v1 (`configs/logreg_history_rates.yaml`) reproduces too. Retraining it with the current code
+on 2026-11-18 gave validation AUC 0.725536 and accuracy 0.662159, identical to its logged run.
+v1 stops at lbfgs's 300-iteration cap; the final model converges in 154.
 
 Load the production model with `mlflow.sklearn.load_model("models:/pulse-latenet@production")`,
 or from the DVC copy with `mlflow.sklearn.load_model("models/pulse-latenet")`.
@@ -710,13 +778,42 @@ and threshold are applied outside it.
 
 ## 7. Limitations & Next Steps
 
+### Where the final model is wrong most often (validation)
+
+From `python -m src.failure_cases final --threshold 0.40`: the final model's validation
+predictions, after rolling recalibration, at the 0.40 threshold. Test isn't used. Overall, 34.4%
+of buses get the wrong signal:
+- **22.0% of late buses are missed:** shown as "Usually on time", the spec's expensive mistake.
+- **46.2% of on-time buses are flagged:** the price of the pessimistic threshold.
+
+| Where | What goes wrong | Numbers |
+|---|---|---|
+| **Morning school peak, 7–8am** | under-predicted, so late buses are missed | predicted 37% / 41% against 47% / 51% actual; at 7am **43% of late buses are missed** (22% overall) |
+| **First school week, 8–11 Sep** | under-predicted while the recalibration catches up (it lags a week) | 5–8 points under each day; 26–33% of late buses missed on 8–9 Sep |
+| **Weekends** | over-predicted, because the daily shift is network-wide and weekday-dominated | Saturday +5, Sunday +5 points; **Sunday 13 Sep: 54% predicted against 38% actual**, 64% of its on-time buses flagged |
+| **Late evening, 9pm–midnight** | over-predicted | 6–8 points too high, false alarms 49–56% |
+| **Reliable routes** (SL1, SL2, 111, 57, 23; 24–40% late) | the model rarely warns there, so their late buses are mostly missed | **51–57% of late buses missed** |
+| **Chronically late routes** (31, 44, 35, 450; 67–72% late) | the model almost always warns there, so their on-time buses are flagged too | 79–96% of on-time buses flagged; only 2–5% of late buses missed |
+
+**What it means for the product:**
+- A warning mostly says "this route and slot are usually late". On a chronically late route,
+  the warning is close to permanent and tells a rider little about today's bus.
+- On a reliable route, the rare late bus is the one Pulse misses.
+- Route ranking is strong: route-level predicted and actual late rates correlate at 0.958.
+  The errors are about *individual days and hours*, not about which routes are bad.
+
+The fixes that follow are in the next steps below: recalibration by day type and hour band,
+a school-calendar input now that training spans a term, and day-level inputs (weather,
+alerts).
+
 ### What the model can't do
 
 - **React quickly to change.** The recalibration lags a week, and the late rates lag up to
-  eight weeks. The school-term morning peak was still under-predicted by 11–12 points
-  in the second half of September.
+  eight weeks. The school-term morning peak is under-predicted by about 10 points on
+  validation (final model) and was under-predicted by 11–12 on test (v1).
 - **Treat weekends separately from weekdays in recalibration.** The network-wide daily shift
-  over-predicts weekends (49% predicted vs 31% actual on 26 September).
+  over-predicts weekends: 54% predicted against 38% actual on Sunday 13 September (final
+  model, validation), and 49% against 31% on 26 September (v1, test).
 - **Predict day-specific disruption.** Weather, incidents, detours and events aren't in the
   features. That's most of the variation left above AUC 0.74.
 - **Cover every stop.** Only timepoints have labels.
@@ -727,8 +824,8 @@ and threshold are applied outside it.
   conventions staying stable (§1), so `src/lamp_check.py` should be rerun whenever a monthly
   file arrives.
 - **Count cancellations.** They are dropped with missing records, not counted as late.
-- **Know the seasons.** There are only three months of history: one summer and two weeks of
-  term, no winter.
+- **Know the seasons.** Training covers April–August: spring term, summer and the switch
+  between them, but no winter and no autumn term before September.
 
 ### With more time
 

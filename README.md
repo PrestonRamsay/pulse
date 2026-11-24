@@ -39,7 +39,7 @@ MBTA_API_KEY=your_key
 `DATABASE_URL=postgresql://pulse:pulse@localhost:5432/pulse`. The scripts create the
 `stop_events` table from `src/schema.sql` if it doesn't exist.
 
-## From a fresh clone to the leading run
+## From a fresh clone to the winning run
 
 After the setup above (the venv and `pip install -r requirements.txt`; no database or `.env`
 is needed for this path):
@@ -56,18 +56,19 @@ python -m src.train configs/final.yaml
   over HTTPS. A DagsHub copy (`origin`) is kept as a backup and needs a DagsHub login.
   Maintainers add new files with `python scripts/sync_dvc_store.py`, because DVC can't push
   to the GitHub store.
-- The second command retrains the current leading run (`logreg_history_rates`, logistic regression on
-  schedule fields + recent late rates) and logs it to a new local MLflow store. It prints
-  validation **AUC 0.7255, accuracy 0.6622**, the same as the logged run, because the fit is
-  deterministic. It takes about 2 minutes.
+- The second command retrains the winning run, `final`: a logistic regression on schedule
+  fields plus recent late rates, trained on 15 April – 31 August 2026. It logs the run to a
+  new local MLflow store and prints validation **AUC 0.7324, accuracy 0.6692**, the same as
+  the logged run (`4235459a…`), because the fit is deterministic. It takes about 4 minutes.
 
 Optional follow-ups, each one command:
 
 ```bash
-python -m src.calibrate logreg_history_rates                   # rolling recalibration + threshold table
-python -m src.evaluate logreg_history_rates --threshold 0.40   # the single test evaluation (AUC 0.738)
-python -m src.latency_check                                    # single-prediction CPU latency (~13 ms)
-mlflow ui --backend-store-uri sqlite:///mlflow.db              # browse the runs ("Model training" view)
+python -m src.calibrate final                     # rolling recalibration + threshold menu (0.40 chosen)
+python -m src.failure_cases final                 # where the model is wrong most often (validation)
+python -m src.evaluate final --threshold 0.40     # the single test evaluation (reads the test split)
+python -m src.latency_check                       # single-prediction CPU latency (~13 ms)
+mlflow ui --backend-store-uri sqlite:///mlflow.db # browse the runs ("Model training" view)
 ```
 
 Results and the reasoning behind every choice: [REPORT.md](REPORT.md).
@@ -129,23 +130,27 @@ Results and the reasoning behind every choice: [REPORT.md](REPORT.md).
    ```bash
    python -m src.train configs/history_slot_8wk.yaml        # spec baseline, no training
    python -m src.train configs/gbt_history.yaml             # gradient-boosted trees
-   python -m src.train configs/final.yaml                   # the current leader (= logreg_history_rates)
-   python -m src.calibrate logreg_history_rates             # rolling recalibration + threshold table
+   python -m src.train configs/logreg_history_rates.yaml    # v1: logistic regression, July-August
+   python -m src.make_extra --start 2026-04-01 --end 2026-06-30 --name apr_jun   # April-June file
+   python -m src.train configs/final.yaml                   # final: the same, trained April-August
+   python -m src.calibrate final                            # rolling recalibration + threshold menu
    ```
 
    The neural network (latenet) is trained per config with `src.train_latenet`. Its
    validation tables come from `src.evaluate_latenet`:
 
    ```bash
-   python -m src.train_latenet configs/latenet_final.yaml   # best net, val AUC 0.716
-   python -m src.evaluate_latenet val --threshold 0.35      # metrics, calibration by hour, routes, thresholds
+   python -m src.train_latenet configs/latenet_final.yaml        # best July-August net, val AUC 0.716
+   python -m src.train_latenet configs/latenet_history_apr_aug.yaml   # April-August net (seeds 1-3: *_seed1..3)
+   python -m src.evaluate_latenet val --threshold 0.35           # metrics, calibration by hour, routes, thresholds
    ```
 
 7. Final evaluation, run once. This is the only step that reads the test split. It
-   registers `pulse-latenet` and promotes it to Production if it beats every baseline:
+   registers `pulse-latenet` in Staging and promotes it to Production if it beats every
+   baseline:
 
    ```bash
-   python -m src.evaluate logreg_history_rates --threshold 0.40 --register
+   python -m src.evaluate final --threshold 0.40 --register
    ```
 
 ## Tests

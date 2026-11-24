@@ -1,6 +1,6 @@
 """The single final evaluation on the held-out test split, then register the model.
 
-    python -m src.evaluate logreg_history_rates --threshold 0.40 --register
+    python -m src.evaluate final --threshold 0.40 --register      # the final model (configs/final.yaml)
 
 This is the only script that reads data/splits/test.parquet. It refuses to run twice for the
 same run (the run gets test_* metrics the first time) unless --force is given, so the test
@@ -15,8 +15,12 @@ Steps:
    regression (refit on train, deterministic), and the slot's 8-week late rate.
 4. Metrics at the fixed threshold, confusion matrix, calibration by hour, top routes,
    alternative thresholds, and a day-level bootstrap of the AUC margin over each baseline.
-5. With --register: register the model as pulse-latenet and, if it beats every baseline on
-   test AUC with the bootstrap interval above zero, promote it to Production.
+5. With --register: register the model as pulse-latenet in Staging and, if it beats every
+   baseline on test AUC with the bootstrap interval above zero, promote it to Production
+   (archiving the previous version) and point the production alias at it.
+
+Configs with extra_data (src/extra.py) get the same extra months here as in training, so test
+features are built exactly as train and validation features were.
 """
 
 import argparse
@@ -32,6 +36,7 @@ from sklearn.metrics import (accuracy_score, average_precision_score, brier_scor
 
 from src.calibrate import apply_shifts, ece, rolling_shifts, threshold_table
 from src.db import ROOT
+from src.extra import keep_train_rows, load_extra
 from src.features import add_day_type, add_history_features
 from src.models import build_model
 from src.train import CATEGORICAL, PRED_DIR, SPLIT_DIR, TRACKING_URI, dvc_md5, feature_lists, git_commit, model_inputs
@@ -42,21 +47,34 @@ ALT_THRESHOLDS = (0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60)
 MIN_ROUTE_ROWS = 2000  # routes smaller than this are too noisy for the top-5 check
 
 
-def load_all(cfg):
-    names = ("train", "val", "test")
+def load_all(cfg, names=("train", "val", "test")):
+    """The splits in `names` (in date order) with day type and history features built exactly
+    as in training, including any extra_data months (src/extra.py) before the first split.
+    Every row still uses only earlier service days. Returns one frame per name; the first
+    (train) gets the same extra rows and burn-in as in src/train.py."""
     parts = [pd.read_parquet(SPLIT_DIR / f"{n}.parquet") for n in names]
     starts = [p["service_date"].min() for p in parts]
-    df = add_day_type(pd.concat(parts, ignore_index=True))
+    extra = load_extra(cfg)
+    df = add_day_type(pd.concat(parts if extra is None else [extra, *parts], ignore_index=True))
     for c in CATEGORICAL:
         df[c] = df[c].astype(str).astype("category")
     hist = cfg.get("history")
     if hist:
         df = add_history_features(df, df, windows=tuple(hist["windows"]), smoothing=hist["smoothing"])
     d = df["service_date"]
-    train = df[d < starts[1]]
+    bounds = [None, *starts[1:], None]  # the first split also takes the extra months before it
+    frames = []
+    for lo, hi in zip(bounds, bounds[1:]):
+        mask = pd.Series(True, index=df.index)
+        if lo is not None:
+            mask &= d >= lo
+        if hi is not None:
+            mask &= d < hi
+        frames.append(df[mask])
+    train = keep_train_rows(frames[0], cfg, starts[0])
     burn_in = cfg.get("train", {}).get("burn_in_days", 0)
-    train = train[train["service_date"] >= starts[0] + pd.Timedelta(days=burn_in)]
-    return train, df[(d >= starts[1]) & (d < starts[2])], df[d >= starts[2]]
+    frames[0] = train[train["service_date"] >= train["service_date"].min() + pd.Timedelta(days=burn_in)]
+    return frames
 
 
 def metrics_at(y, p, threshold):
@@ -97,9 +115,6 @@ def main(argv=None):
     if "metrics.test_auc_roc" in runs and pd.notna(runs["metrics.test_auc_roc"].iloc[0]) and not args.force:
         raise SystemExit(f"{args.run_name} already has test metrics: the test split is evaluated once.")
     cfg = yaml.safe_load((ROOT / "configs" / f"{args.run_name}.yaml").read_text())
-    if cfg.get("extra_data"):
-        raise SystemExit("extra_data runs aren't supported here (test windows would differ from training); "
-                         "and test is not to be scored again without the reviewer's OK.")
     categorical, numeric = feature_lists(cfg)
 
     train, val, test = load_all(cfg)
@@ -127,7 +142,8 @@ def main(argv=None):
         "history_slot_8wk": test["rate_slot_56d"].to_numpy(dtype=float),
     }
 
-    results = {"model_raw": metrics_at(y, raw, args.threshold), "model": metrics_at(y, cal, args.threshold)}
+    results = {"model_raw": metrics_at(y, raw, args.threshold), "model": metrics_at(y, cal, args.threshold),
+               "model_at_0.5": metrics_at(y, cal, 0.5)}  # the acceptance bar is accuracy at 0.5
     for name, p in baselines.items():
         results[name] = metrics_at(y, p, 0.5)
         if name != "baseline_majority":
@@ -173,6 +189,7 @@ def main(argv=None):
     with mlflow.start_run(run_id=run_id):
         mlflow.log_metrics({f"test_{k}": v for k, v in results["model"].items() if not isinstance(v, tuple)})
         mlflow.log_metrics({f"test_raw_{k}": v for k, v in results["model_raw"].items()})
+        mlflow.log_metric("test_accuracy_at_0.5", results["model_at_0.5"]["accuracy"])
         mlflow.log_params({"test_threshold": args.threshold, "test_cal_window_days": args.window})
         for p in PRED_DIR.glob(f"{tag}_*"):
             if p.suffix in (".csv", ".json"):
@@ -183,17 +200,25 @@ def main(argv=None):
         for k, v in {"threshold": args.threshold, "recalibration": f"rolling {args.window}-day log-odds shift",
                      "test_auc_roc": round(results["model"]["auc_roc"], 4),
                      "test_accuracy": round(results["model"]["accuracy"], 4),
-                     "source_run": args.run_name, "git_commit": summary["git_commit"]}.items():
+                     "test_accuracy_at_0.5": round(results["model_at_0.5"]["accuracy"], 4),
+                     "source_run": args.run_name, "run_id": run_id, "git_commit": summary["git_commit"]}.items():
             client.set_model_version_tag(MODEL_NAME, mv.version, k, str(v))
+        first_day = train["service_date"].min().date()
         client.update_model_version(MODEL_NAME, mv.version, description=(
-            f"{args.run_name}: logistic regression on schedule fields + recent late rates. "
-            f"Serve with rolling {args.window}-day recalibration; warn when probability >= {args.threshold}."))
+            f"From MLflow run {run_id} ({args.run_name}, configs/{args.run_name}.yaml), trained on "
+            f"{first_day} to {train['service_date'].max().date()}. Logistic regression on one-hot schedule "
+            f"fields + 16 recent late rates (earlier service days only). Serve with rolling {args.window}-day "
+            f"log-odds recalibration; warn when probability >= {args.threshold}. "
+            f"Test: AUC {results['model']['auc_roc']:.3f}, accuracy {results['model_at_0.5']['accuracy']:.1%} at 0.5."))
+        # Promotion path: Staging first, then Production if it beats every baseline on test.
+        client.transition_model_version_stage(MODEL_NAME, mv.version, "Staging")
+        print(f"registered {MODEL_NAME} v{mv.version} in Staging")
         if beats_all:
             client.transition_model_version_stage(MODEL_NAME, mv.version, "Production", archive_existing_versions=True)
             client.set_registered_model_alias(MODEL_NAME, "production", mv.version)
-            print(f"registered {MODEL_NAME} v{mv.version} and promoted to Production")
+            print(f"promoted {MODEL_NAME} v{mv.version} to Production (previous version archived)")
         else:
-            print(f"registered {MODEL_NAME} v{mv.version}; NOT promoted: does not beat every baseline on test")
+            print(f"{MODEL_NAME} v{mv.version} stays in Staging: does not beat every baseline on test")
 
 
 if __name__ == "__main__":
