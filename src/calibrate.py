@@ -82,7 +82,9 @@ def threshold_table(y, p, thresholds=THRESHOLDS):
         rows.append({"threshold": t, "warned_share": warn.mean(),
                      "recall": y[warn].sum() / y.sum(),
                      "precision": y[warn].mean() if warn.any() else np.nan,
-                     "unwarned_late_rate": y[~warn].mean() if (~warn).any() else np.nan})
+                     "unwarned_late_rate": y[~warn].mean() if (~warn).any() else np.nan,
+                     "on_time_flagged": warn[y == 0].mean() if (y == 0).any() else np.nan,
+                     "accuracy": (warn == (y == 1)).mean()})
     return pd.DataFrame(rows)
 
 
@@ -103,14 +105,18 @@ def main(argv=None):
             for k, v in calibration_metrics(part["late"], part[col]).items():
                 metrics[f"{scope}_{kind}_{k}"] = v
     table = threshold_table(check["late"], check["proba_cal"])
+    table_all = threshold_table(preds["late"], preds["proba_cal"])  # all of validation (1-15 Sep)
 
     print(f"{args.run_name}: rolling {args.window}-day recalibration")
     for scope in ("val", "wk2"):
         for kind in ("raw", "cal"):
             print(f"  {scope} {kind}: " + ", ".join(
                 f"{k}={metrics[f'{scope}_{kind}_{k}']:.4f}" for k in ("mean_pred", "late_rate", "ece", "brier", "auc_roc")))
+    fmt = lambda v: f"{v:.3f}"
+    print("  thresholds on all validation days, recalibrated:")
+    print(table_all.to_string(index=False, float_format=fmt))
     print(f"  thresholds on {CHECK_FROM} onward, recalibrated:")
-    print(table.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+    print(table.to_string(index=False, float_format=fmt))
 
     mlflow.set_tracking_uri(TRACKING_URI)
     runs = mlflow.search_runs(experiment_names=["pulse-late-3min"],
@@ -122,6 +128,9 @@ def main(argv=None):
         out = PRED_DIR / f"{args.run_name}_thresholds.csv"
         table.to_csv(out, index=False)
         mlflow.log_artifact(str(out), artifact_path="calibration")
+        out_all = PRED_DIR / f"{args.run_name}_thresholds_val_all.csv"
+        table_all.to_csv(out_all, index=False)
+        mlflow.log_artifact(str(out_all), artifact_path="calibration")
     print(f"logged to run {runs['run_id'].iloc[0]} ({out.relative_to(ROOT).as_posix()})")
 
 

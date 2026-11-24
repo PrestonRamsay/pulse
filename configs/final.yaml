@@ -1,13 +1,11 @@
-# The current leading configuration (final choice pending; it will be made last, on
-# validation; see REPORT.md §3 status note). Identical to configs/logreg_history_rates.yaml
-# (MLflow run 10194bd1..., registered as pulse-latenet v1). Leads every other run on
-# validation, including the neural network (configs/latenet_final.yaml). Serve with rolling
-# 7-day recalibration and a 0.40 warning threshold (REPORT.md §5).
-# logreg_history without the history count features. In logreg_history the counts grew as
-# the windows filled from 1 July, so September rows looked "later" than any train row and the
-# model over-predicted (mean 0.57 vs 0.49 actual). Rates only here.
+# The final model: logistic regression on schedule fields + recent late rates, trained on
+# 15 April - 31 August 2026 (experiment B; April-June from data/splits/apr_jun.parquet).
+# Same settings as configs/logreg_history_rates_apr_aug.yaml. Chosen on validation by the
+# rule fixed before the seed results (REPORT.md §3 status note): the April-August network led
+# by 0.0031 AUC over 4 seeds but peaked at epoch 1 in 3 of them. Serve with rolling 7-day
+# recalibration; the threshold is picked on validation (REPORT.md §5) before any test run.
 experiment: pulse-late-3min
-run_name: logreg_history_rates
+run_name: final
 label: late
 features: [route_id, direction_id, stop_id, point_type, standard_type, hour, day_of_week, day_type]
 numeric_features: [scheduled_headway, time_point_order]
@@ -20,3 +18,6 @@ train:
 model:
   type: logreg
   params: {solver: lbfgs, C: 1.0, max_iter: 300}
+extra_data:
+  files: [apr_jun]
+  use: train
