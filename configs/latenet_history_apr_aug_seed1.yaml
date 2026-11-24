@@ -1,0 +1,35 @@
+# Seed check (reviewer point 3): latenet_history_apr_aug with seed 1; nothing else changes.
+# Experiment B: latenet_final trained on April-August 2026 (from 15 Apr after the 14-day
+# burn-in), so it sees school-term weeks. Validation unchanged.
+experiment: pulse-late-3min
+run_name: latenet_history_apr_aug_seed1
+seed: 1
+
+model:
+  embedding_dims:        # size of each learned vector; vocab sizes are 155 / 1163 / 24 / 7 / 3
+    route_id: 16
+    stop_id: 32
+    hour: 8
+    day_of_week: 4
+    point_type: 2
+  hidden: [256, 128]     # two hidden layers
+  dropout: 0.1
+
+train:
+  batch_size: 8192
+  learning_rate: 0.003 
+  weight_decay: 0.0
+  max_epochs: 20
+  patience: 3            # stop after 3 epochs without a better validation AUC
+  min_delta: 0.0005      # an improvement smaller than this doesn't count
+  threshold: 0.5         # for validation accuracy
+
+history:
+  windows: [7, 14, 28, 56]
+  smoothing: 20.0
+  burn_in_days: 14
+
+output: models/sweep/latenet_history_apr_aug_seed1.pt
+extra_data:
+  files: [apr_jun]
+  use: train
