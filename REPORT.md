@@ -671,7 +671,7 @@ trips, the threshold has to rise, and more late trips will be shown as on time.
 | MLflow tracking | `sqlite:///mlflow.db`, artifacts in `mlruns/` |
 | MLflow experiment | `pulse-late-3min` (20 runs) |
 | Current leading run (final choice pending) | `logreg_history_rates`, run id `10194bd134054df4bef5ef658e3dfff3`, config `configs/final.yaml` |
-| Registered model | `pulse-latenet` **version 1**, moved through **Staging** to **Production**, alias `production`. Its description names the source run. |
+| Registered model | `pulse-latenet` **version 1**, moved through **Staging** to **Production**, alias `production`. Its description names the source run. Screenshot of the registry page: [`assets/registry_pulse-latenet_production.jpg`](assets/registry_pulse-latenet_production.jpg) (2026-11-24). The final April–August model becomes version 2 after its test run, and the screenshot will be retaken then. |
 | Model version tags | threshold 0.4, recalibration rolling 7-day, test AUC 0.7375 |
 
 Reproduce from a fresh clone (README.md has the setup):
