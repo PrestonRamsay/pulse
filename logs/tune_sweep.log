@@ -1,0 +1,79 @@
+=== tune_lr001 15:02:36
+epoch 1: train_loss=0.5732, val_loss=0.6070, val_auc_roc=0.7338, val_accuracy=0.6705, epoch_seconds=177.4172
+epoch 2: train_loss=0.5671, val_loss=0.6117, val_auc_roc=0.7338, val_accuracy=0.6709, epoch_seconds=175.7435
+epoch 3: train_loss=0.5640, val_loss=0.6077, val_auc_roc=0.7348, val_accuracy=0.6711, epoch_seconds=173.0898
+epoch 4: train_loss=0.5617, val_loss=0.6116, val_auc_roc=0.7342, val_accuracy=0.6703, epoch_seconds=171.1096
+epoch 5: train_loss=0.5598, val_loss=0.6136, val_auc_roc=0.7343, val_accuracy=0.6698, epoch_seconds=176.9265
+epoch 6: train_loss=0.5584, val_loss=0.6110, val_auc_roc=0.7325, val_accuracy=0.6693, epoch_seconds=176.3400
+stopping: no improvement for 3 epochs
+best epoch 3: val_auc_roc=0.7348
+=== tune_wd1e4 15:21:39
+epoch 1: train_loss=0.5705, val_loss=0.6066, val_auc_roc=0.7319, val_accuracy=0.6683, epoch_seconds=175.3429
+epoch 2: train_loss=0.5659, val_loss=0.6097, val_auc_roc=0.7305, val_accuracy=0.6685, epoch_seconds=214.5943
+epoch 3: train_loss=0.5648, val_loss=0.6142, val_auc_roc=0.7311, val_accuracy=0.6632, epoch_seconds=284.0188
+epoch 4: train_loss=0.5641, val_loss=0.6191, val_auc_roc=0.7363, val_accuracy=0.6711, epoch_seconds=350.8525
+epoch 5: train_loss=0.5639, val_loss=0.6130, val_auc_roc=0.7365, val_accuracy=0.6718, epoch_seconds=523.6572
+epoch 6: train_loss=0.5637, val_loss=0.6124, val_auc_roc=0.7331, val_accuracy=0.6687, epoch_seconds=853.5840
+epoch 7: train_loss=0.5635, val_loss=0.6159, val_auc_roc=0.7293, val_accuracy=0.6653, epoch_seconds=554.1102
+stopping: no improvement for 3 epochs
+best epoch 4: val_auc_roc=0.7363
+=== tune_dropout03 16:12:22
+epoch 1: train_loss=0.5730, val_loss=0.6050, val_auc_roc=0.7344, val_accuracy=0.6706, epoch_seconds=224.6780
+epoch 2: train_loss=0.5677, val_loss=0.6108, val_auc_roc=0.7343, val_accuracy=0.6714, epoch_seconds=239.8630
+epoch 3: train_loss=0.5654, val_loss=0.6055, val_auc_roc=0.7358, val_accuracy=0.6704, epoch_seconds=241.7510
+epoch 4: train_loss=0.5637, val_loss=0.6151, val_auc_roc=0.7357, val_accuracy=0.6717, epoch_seconds=229.7707
+epoch 5: train_loss=0.5626, val_loss=0.6097, val_auc_roc=0.7356, val_accuracy=0.6716, epoch_seconds=228.4163
+epoch 6: train_loss=0.5616, val_loss=0.6108, val_auc_roc=0.7342, val_accuracy=0.6693, epoch_seconds=196.8486
+stopping: no improvement for 3 epochs
+best epoch 3: val_auc_roc=0.7358
+=== tune_emb_small 16:36:33
+epoch 1: train_loss=0.5710, val_loss=0.6117, val_auc_roc=0.7369, val_accuracy=0.6712, epoch_seconds=176.0821
+epoch 2: train_loss=0.5648, val_loss=0.6142, val_auc_roc=0.7333, val_accuracy=0.6675, epoch_seconds=211.8872
+epoch 3: train_loss=0.5617, val_loss=0.6147, val_auc_roc=0.7317, val_accuracy=0.6666, epoch_seconds=189.5411
+epoch 4: train_loss=0.5597, val_loss=0.6139, val_auc_roc=0.7326, val_accuracy=0.6690, epoch_seconds=183.1540
+stopping: no improvement for 3 epochs
+best epoch 1: val_auc_roc=0.7369
+=== tune_lr0003 16:50:42
+epoch 1: train_loss=0.5775, val_loss=0.6081, val_auc_roc=0.7333, val_accuracy=0.6699, epoch_seconds=177.4383
+epoch 2: train_loss=0.5708, val_loss=0.6093, val_auc_roc=0.7348, val_accuracy=0.6722, epoch_seconds=176.4820
+epoch 3: train_loss=0.5689, val_loss=0.6084, val_auc_roc=0.7348, val_accuracy=0.6708, epoch_seconds=171.9977
+epoch 4: train_loss=0.5673, val_loss=0.6094, val_auc_roc=0.7345, val_accuracy=0.6713, epoch_seconds=190.1215
+epoch 5: train_loss=0.5660, val_loss=0.6127, val_auc_roc=0.7330, val_accuracy=0.6699, epoch_seconds=171.7603
+stopping: no improvement for 3 epochs
+best epoch 2: val_auc_roc=0.7348
+=== tune_wd1e5 17:06:55
+epoch 1: train_loss=0.5693, val_loss=0.6060, val_auc_roc=0.7339, val_accuracy=0.6689, epoch_seconds=173.9065
+epoch 2: train_loss=0.5615, val_loss=0.6105, val_auc_roc=0.7326, val_accuracy=0.6700, epoch_seconds=198.7585
+epoch 3: train_loss=0.5592, val_loss=0.6093, val_auc_roc=0.7304, val_accuracy=0.6652, epoch_seconds=226.9794
+epoch 4: train_loss=0.5581, val_loss=0.6130, val_auc_roc=0.7337, val_accuracy=0.6687, epoch_seconds=307.7977
+stopping: no improvement for 3 epochs
+best epoch 1: val_auc_roc=0.7339
+=== tune_dropout03_lr001 17:23:44
+epoch 1: train_loss=0.5753, val_loss=0.6060, val_auc_roc=0.7346, val_accuracy=0.6714, epoch_seconds=177.8791
+epoch 2: train_loss=0.5696, val_loss=0.6095, val_auc_roc=0.7351, val_accuracy=0.6716, epoch_seconds=173.3765
+epoch 3: train_loss=0.5675, val_loss=0.6074, val_auc_roc=0.7345, val_accuracy=0.6700, epoch_seconds=233.1455
+epoch 4: train_loss=0.5658, val_loss=0.6093, val_auc_roc=0.7355, val_accuracy=0.6717, epoch_seconds=180.3435
+epoch 5: train_loss=0.5645, val_loss=0.6108, val_auc_roc=0.7346, val_accuracy=0.6707, epoch_seconds=171.7188
+stopping: no improvement for 3 epochs
+best epoch 2: val_auc_roc=0.7351
+=== tune_dropout03_seed1 17:40:59
+epoch 1: train_loss=0.5726, val_loss=0.6037, val_auc_roc=0.7365, val_accuracy=0.6726, epoch_seconds=176.2118
+epoch 2: train_loss=0.5676, val_loss=0.6111, val_auc_roc=0.7342, val_accuracy=0.6706, epoch_seconds=176.7346
+epoch 3: train_loss=0.5654, val_loss=0.6089, val_auc_roc=0.7345, val_accuracy=0.6695, epoch_seconds=172.3712
+epoch 4: train_loss=0.5639, val_loss=0.6119, val_auc_roc=0.7348, val_accuracy=0.6708, epoch_seconds=176.7745
+stopping: no improvement for 3 epochs
+best epoch 1: val_auc_roc=0.7365
+=== tune_dropout03_seed2 17:54:11
+epoch 1: train_loss=0.5725, val_loss=0.6089, val_auc_roc=0.7370, val_accuracy=0.6733, epoch_seconds=173.3431
+epoch 2: train_loss=0.5674, val_loss=0.6100, val_auc_roc=0.7352, val_accuracy=0.6715, epoch_seconds=215.7997
+epoch 3: train_loss=0.5651, val_loss=0.6076, val_auc_roc=0.7333, val_accuracy=0.6700, epoch_seconds=187.5877
+epoch 4: train_loss=0.5637, val_loss=0.6098, val_auc_roc=0.7351, val_accuracy=0.6715, epoch_seconds=178.7730
+stopping: no improvement for 3 epochs
+best epoch 1: val_auc_roc=0.7370
+=== tune_dropout03_seed3 18:08:14
+epoch 1: train_loss=0.5727, val_loss=0.6078, val_auc_roc=0.7352, val_accuracy=0.6713, epoch_seconds=186.8147
+epoch 2: train_loss=0.5677, val_loss=0.6083, val_auc_roc=0.7356, val_accuracy=0.6712, epoch_seconds=173.2413
+epoch 3: train_loss=0.5655, val_loss=0.6109, val_auc_roc=0.7333, val_accuracy=0.6697, epoch_seconds=198.3506
+epoch 4: train_loss=0.5639, val_loss=0.6137, val_auc_roc=0.7344, val_accuracy=0.6708, epoch_seconds=178.3904
+stopping: no improvement for 3 epochs
+best epoch 1: val_auc_roc=0.7352
